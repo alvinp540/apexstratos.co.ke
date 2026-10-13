@@ -13,6 +13,11 @@ class UserAdmin(BaseUserAdmin):
         ('APEX', {'fields': ('role', 'is_email_verified', 'phone_number')}),
     )
 
+    def save_model(self, request, obj, form, change):
+        if obj.role == 'admin':
+            obj.is_staff = True
+        super().save_model(request, obj, form, change)
+
 
 @admin.register(Subscription)
 class SubscriptionAdmin(admin.ModelAdmin):

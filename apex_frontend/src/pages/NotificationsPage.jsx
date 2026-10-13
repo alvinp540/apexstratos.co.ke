@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import Navbar from '../components/common/Navbar'
 import { getNotifications, markRead, markAllRead } from '../api/notificationAPI'
-import { Link } from 'react-router-dom'
 import { useNotifications } from '../context/NotificationContext'
 import { formatTimeAgo } from '../utils/formatters'
 import LoadingSpinner from '../components/common/LoadingSpinner'
@@ -56,7 +55,6 @@ export default function NotificationsPage() {
                   <div style={{ fontWeight: 600 }}>{n.title}</div>
                   <div style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>{n.message}</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>{formatTimeAgo(n.created_at)}</div>
-                  {n.action_url && (n.action_url.startsWith('/') ? <Link to={n.action_url} onClick={(event) => event.stopPropagation()} style={{ display: 'inline-block', marginTop: '0.45rem', color: 'var(--color-primary)', fontWeight: 700 }}>Open related action</Link> : <a href={n.action_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} style={{ display: 'inline-block', marginTop: '0.45rem', color: 'var(--color-primary)', fontWeight: 700 }}>Open WhatsApp action</a>)}
                 </div>
               </div>
             ))}

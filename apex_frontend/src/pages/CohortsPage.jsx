@@ -156,7 +156,7 @@ export default function CohortsPage() {
                 <div key={c.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', background: 'rgba(15,23,42,0.78)', border: '1px solid rgba(148,163,184,0.12)' }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{c.title}</div>
-                    <div style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>{c.profession} · {c.level || 'beginner'} · {tierLabels[c.payment_tier]} · {c.participant_count}/{c.max_participants} placed · Unlocks at {c.assessment_unlock_threshold}</div>
+                    <div style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>{c.profession} · {tierLabels[c.payment_tier]} · {c.participant_count}/{c.max_participants} placed · Unlocks at {c.assessment_unlock_threshold}</div>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button onClick={() => handleEnroll(c.id)} className="btn-outline">Enroll</button>

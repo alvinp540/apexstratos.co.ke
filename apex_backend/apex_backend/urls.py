@@ -1,9 +1,26 @@
 from django.contrib import admin
-from django.http import HttpResponse
+from django.db import connection
+from django.http import HttpResponse, JsonResponse
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from apps.analytics.views import PublicPlatformStatsView
+import os
+
+
+def health(request):
+  try:
+    connection.ensure_connection()
+  except Exception:
+    return JsonResponse({'status': 'unavailable', 'database': 'unavailable'}, status=503)
+  return JsonResponse({'status': 'ok', 'database': 'ok'})
+
+
+def version(request):
+  return JsonResponse({
+    'version': os.environ.get('APEX_VERSION', 'unconfigured'),
+    'commit': os.environ.get('GIT_COMMIT', 'unconfigured'),
+  })
 
 
 def api_root(request):
@@ -37,6 +54,8 @@ def api_root(request):
 
 
 urlpatterns = [
+  path('health', health, name='health'),
+  path('version', version, name='version'),
     path('', api_root, name='api-root'),
     path('admin/', admin.site.urls),
     path('api/v1/auth/', include('apps.accounts.urls')),

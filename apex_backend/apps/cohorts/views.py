@@ -4,14 +4,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q
 from datetime import timedelta
 import random
 
-from .models import Cohort, Assessment, AssessmentAttempt, CohortEnrollment
+from .models import Cohort, Assessment, AssessmentAttempt, CohortEnrollment, Tutorial
 from .serializers import (
     CohortSerializer, AssessmentSerializer, AssessmentAttemptSerializer, HeartbeatSerializer,
     PSPRegistrationCreateSerializer,
+    TutorialQuerySerializer, TutorialSerializer,
 )
 from .models import PSPRegistration, PSPVerification, WhatsAppInviteRequest, CohortCoachAssignment
 from .serializers import PSPRegistrationSerializer, PSPVerificationSerializer, WhatsAppInviteRequestSerializer, CoachPayoutSerializer
@@ -19,6 +21,36 @@ from .anti_cheat import flag_attempt
 from apps.trust_engine.engine import recalculate_trust_score
 from apps.accounts.permissions import IsAdmin
 from .allocation import allocate_cohort_rewards
+from utils.pagination import StandardResultsPagination
+
+
+class TutorialListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        filters = TutorialQuerySerializer(data=request.query_params)
+        filters.is_valid(raise_exception=True)
+        tutorials = Tutorial.objects.filter(
+            status__in=('published', 'scheduled'),
+            scheduled_for__lte=timezone.now(),
+        ).prefetch_related('questions').order_by('scheduled_for', 'field', 'daily_slot')
+        tutorials = tutorials.filter(**filters.validated_data)
+        paginator = StandardResultsPagination()
+        page = paginator.paginate_queryset(tutorials, request)
+        return paginator.get_paginated_response(TutorialSerializer(page, many=True).data)
+
+
+class TutorialDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, tutorial_id):
+        tutorial = get_object_or_404(
+            Tutorial.objects.prefetch_related('questions'),
+            id=tutorial_id,
+            status__in=('published', 'scheduled'),
+            scheduled_for__lte=timezone.now(),
+        )
+        return Response(TutorialSerializer(tutorial).data)
 
 
 class CohortListView(APIView):
@@ -125,26 +157,15 @@ class StartAssessmentView(APIView):
         assessment = get_object_or_404(Assessment, id=assessment_id, is_active=True)
         cohort = assessment.cohort
         if not PSPRegistration.objects.filter(
-            user=request.user, cohort=cohort, status='active'
+            user=request.user,
+            cohort=cohort,
+            status='active',
+            psp_tier='100kes',
+            amount_expected=100,
         ).exists():
             return Response(
-                {'error': 'Your PSP payment must be verified before starting this assessment.'},
+                {'error': 'Verified KSh 100 main contest payment is required before starting this assessment.'},
                 status=status.HTTP_403_FORBIDDEN,
-            )
-        if not CohortEnrollment.objects.filter(user=request.user, cohort=cohort).exists():
-            return Response(
-                {'error': 'Join the cohort before starting its assessment.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        participant_count = cohort.enrollments.count()
-        if participant_count < cohort.assessment_unlock_threshold:
-            return Response(
-                {
-                    'error': 'Assessment is locked until the cohort reaches its participant threshold.',
-                    'participants': participant_count,
-                    'required_participants': cohort.assessment_unlock_threshold,
-                },
-                status=status.HTTP_423_LOCKED,
             )
         if AssessmentAttempt.objects.filter(user=request.user, assessment=assessment).exists():
             return Response({'error': 'Already attempted.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -162,9 +183,10 @@ class StartAssessmentView(APIView):
 
 
 class SubmitAssessmentView(APIView):
+    @transaction.atomic
     def post(self, request, assessment_id):
         attempt = get_object_or_404(
-            AssessmentAttempt, assessment_id=assessment_id,
+            AssessmentAttempt.objects.select_for_update(), assessment_id=assessment_id,
             user=request.user, status='in_progress',
         )
         if timezone.now() > attempt.started_at + timedelta(minutes=attempt.assessment.time_limit_minutes):
@@ -172,11 +194,15 @@ class SubmitAssessmentView(APIView):
             attempt.submitted_at = timezone.now()
             attempt.save(update_fields=['status', 'submitted_at'])
             return Response({'error': 'Assessment time has expired.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not request.data.get('video_completed'):
-            return Response({'error': 'Watch the assessment video before submitting.'}, status=status.HTTP_400_BAD_REQUEST)
-        attempt.answers = request.data.get('answers', {})
-        attempt.video_watched_seconds = max(0, int(request.data.get('video_watched_seconds', 0)))
-        attempt.video_completed = True
+        answers = request.data.get('answers', {})
+        if not isinstance(answers, dict):
+            return Response({'error': 'Answers must be submitted as a question-to-answer map.'}, status=status.HTTP_400_BAD_REQUEST)
+        allowed_question_ids = set(attempt.question_order)
+        attempt.answers = {
+            str(question_id): answer
+            for question_id, answer in answers.items()
+            if str(question_id) in allowed_question_ids
+        }
         attempt.submitted_at = timezone.now()
         attempt.status = 'submitted'
         attempt.ip_address = _get_client_ip(request)
@@ -497,26 +523,23 @@ class PSPVerifyView(APIView):
 
 
 def _grade(attempt: AssessmentAttempt) -> float:
-    """
-    Score is computed as a weighted combination of correctness and video engagement.
-    - correctness_pct = correct_points / total_points (weight 75%)
-    - watch_pct = min(1.0, video_watched_seconds / (time_limit_minutes * 60)) (weight 25%)
-    Final score is correctness_pct*75 + watch_pct*25 (0-100 scale).
-    """
-    questions = attempt.assessment.questions.all()
+    questions_by_id = {
+        str(question.id): question
+        for question in attempt.assessment.questions.all()
+    }
+    questions = [
+        questions_by_id[question_id]
+        for question_id in attempt.question_order
+        if question_id in questions_by_id
+    ]
     if not questions:
         return 0.0
     total_points = sum(q.points for q in questions)
     earned = sum(
         q.points for q in questions
-        if attempt.answers.get(str(q.id)) == q.correct_answer
+        if (attempt.answers or {}).get(str(q.id)) == q.correct_answer
     )
-    correctness_pct = (earned / total_points) if total_points else 0.0
-    time_limit_seconds = max(1, attempt.assessment.time_limit_minutes * 60)
-    watch_pct = min(1.0, attempt.video_watched_seconds / time_limit_seconds)
-
-    score = (correctness_pct * 75.0) + (watch_pct * 25.0)
-    return round(score, 2)
+    return round((earned / total_points) * 100, 2) if total_points else 0.0
 
 
 def _get_client_ip(request):

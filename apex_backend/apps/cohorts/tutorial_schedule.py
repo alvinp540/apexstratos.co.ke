@@ -1,0 +1,27 @@
+CAPABILITY_FIELDS = (
+    'Software Development',
+    'Computer Science',
+    'Finance',
+    'General Engineering',
+    'Medical and Health',
+    'Business and the AI Revolution',
+    'Law and Society',
+    'Media and Arts',
+    'Education',
+    'Entrepreneurship',
+)
+
+INITIAL_MONTHS = 2
+WEEKS_PER_MONTH = 4
+TEACHING_DAYS_PER_WEEK = 4
+TUTORIALS_PER_DAY = 2
+QUESTIONS_PER_TUTORIAL = 5
+
+EXPECTED_INITIAL_TUTORIALS = (
+    len(CAPABILITY_FIELDS)
+    * INITIAL_MONTHS
+    * WEEKS_PER_MONTH
+    * TEACHING_DAYS_PER_WEEK
+    * TUTORIALS_PER_DAY
+)
+EXPECTED_INITIAL_QUESTIONS = EXPECTED_INITIAL_TUTORIALS * QUESTIONS_PER_TUTORIAL

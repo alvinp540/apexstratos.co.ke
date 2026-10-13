@@ -1,0 +1,17 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <div id="content-main">
+    <p>Upload one ZIP containing all 20 tutorials for the selected Monday-Thursday schedule: two tutorials for each of the ten capability fields. Each lesson needs its own internal MP4, structured teaching content, objectives, and exactly five practical questions.</p>
+    <p>The import validates the whole package before saving. Successful uploads are created as Drafts and are not visible to students until an admin reviews, approves, and publishes them.</p>
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {{ form.as_p }}
+      <div class="submit-row">
+        <input type="submit" value="Validate and upload daily bundle" class="default">
+        <a href="{% url 'admin:cohorts_tutorial_changelist' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

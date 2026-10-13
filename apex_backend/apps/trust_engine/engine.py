@@ -30,19 +30,21 @@ TIER_THRESHOLDS = [
 
 
 def calculate_psp_consistency(user) -> float:
-    try:
-        sub = user.subscription
-    except Exception:
-        return 0.0
+    from apps.cohorts.models import AssessmentAttempt
 
-    if sub.status == 'active':
-        plan_bonus = {'free': 20, 'starter': 40, 'pro': 70, 'elite': 100}
-        base = plan_bonus.get(sub.plan, 20)
-        delta = timezone.now() - sub.start_date
-        months = max(0, int(delta.days / 30))
-        longevity = min(months, 20)
-        return min(base + longevity, 100.0)
-    return 10.0
+    window_start = timezone.now() - timezone.timedelta(weeks=12)
+    submitted_at_values = AssessmentAttempt.objects.filter(
+        user=user,
+        status='graded',
+        is_flagged=False,
+        submitted_at__gte=window_start,
+    ).values_list('submitted_at', flat=True)
+    active_weeks = {
+        (submitted_at.isocalendar().year, submitted_at.isocalendar().week)
+        for submitted_at in submitted_at_values
+        if submitted_at is not None
+    }
+    return round((len(active_weeks) / 12) * 100, 2)
 
 
 def calculate_cohort_performance(user) -> float:

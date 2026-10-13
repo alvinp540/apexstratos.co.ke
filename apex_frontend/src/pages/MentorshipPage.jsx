@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import Navbar from '../components/common/Navbar'
 import { useAuth } from '../context/AuthContext'
-import { getCohorts, allocateCohortRewards, listWhatsAppInvites, requestWhatsAppInvite, runMentorshipFollowUp, requestCoachPayout, updateCoachPayoutDetails } from '../api/cohortAPI'
+import { getCohorts, allocateCohortRewards, listWhatsAppInvites, requestWhatsAppInvite, runMentorshipFollowUp } from '../api/cohortAPI'
 import toast from 'react-hot-toast'
-import { createActivityNotification } from '../api/notificationAPI'
 
 const coaches = [
   { name: 'Skills Coach', color: '#a78bfa', focus: 'Technical expertise, industry knowledge, AI & robotics, problem solving, certifications.', outcome: 'Better technical capability.' },
@@ -22,9 +21,6 @@ export default function MentorshipPage() {
   const [teamCoach, setTeamCoach] = useState('Skills Coach')
   const [teams, setTeams] = useState([])
   const [whatsappInvites, setWhatsappInvites] = useState([])
-  const [payouts, setPayouts] = useState([])
-  const [payoutDetails, setPayoutDetails] = useState({})
-  const [checkingPayout, setCheckingPayout] = useState(false)
   const active = coaches.find((coach) => coach.name === selected)
 
   useEffect(() => {
@@ -74,23 +70,6 @@ export default function MentorshipPage() {
       toast.error(error.response?.data?.error || 'Could not request a WhatsApp invite.')
     }
   }
-  const handlePayoutRequest = async () => {
-    setCheckingPayout(true)
-    try {
-      const { data } = await requestCoachPayout()
-      setPayouts(data)
-      toast.success('You qualify. Submit your payment details below.')
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'You are not qualified for a coach payout yet.')
-    } finally { setCheckingPayout(false) }
-  }
-  const handlePayoutDetails = async (assignment) => {
-    try {
-      const { data } = await updateCoachPayoutDetails(assignment.id, payoutDetails[assignment.id] || {})
-      setPayouts((current) => current.map((item) => item.id === data.id ? data : item))
-      toast.success('Payment details submitted for admin payout processing.')
-    } catch (error) { toast.error(error.response?.data?.error || 'Payment details could not be submitted.') }
-  }
   return (
     <>
       <Navbar />
@@ -122,27 +101,7 @@ export default function MentorshipPage() {
               <button className="btn-primary" disabled={!selectedCohort || allocating} onClick={handlePayout}>{allocating ? 'Allocating...' : 'Allocate Coach Payouts'}</button>
               <button className="btn-outline" disabled={!selectedCohort || followingUp} onClick={handleFollowUp}>{followingUp ? 'Reviewing...' : 'Run mentorship follow-up'}</button>
             </div>
-          ) : (
-            <div>
-              <button className="btn-primary" onClick={handlePayoutRequest} disabled={checkingPayout}>{checkingPayout ? 'Checking qualification...' : 'Check coach payout qualification'}</button>
-              {payouts.length > 0 && <div style={{ display: 'grid', gap: '0.8rem', marginTop: '1rem' }}>
-                {payouts.map((assignment) => {
-                  const details = payoutDetails[assignment.id] || { payment_method: assignment.payment_method || '', payment_recipient: assignment.payment_recipient || '', payment_note: assignment.payment_note || '' }
-                  return <div key={assignment.id} style={{ border: '1px solid var(--color-border)', padding: '0.8rem' }}>
-                    <strong>{assignment.role_label} · KES {assignment.payout_amount}</strong>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.6rem' }}>
-                      <select aria-label={`Payment method for ${assignment.role_label}`} value={details.payment_method} onChange={(event) => setPayoutDetails((current) => ({ ...current, [assignment.id]: { ...details, payment_method: event.target.value } }))}>
-                        <option value="">Payment method</option><option value="mpesa">M-Pesa</option><option value="bank_transfer">Bank transfer</option><option value="paypal">PayPal</option><option value="other">Other</option>
-                      </select>
-                      <input aria-label={`Payment recipient for ${assignment.role_label}`} placeholder="Number or account" value={details.payment_recipient} onChange={(event) => setPayoutDetails((current) => ({ ...current, [assignment.id]: { ...details, payment_recipient: event.target.value } }))} />
-                      <input aria-label={`Payment note for ${assignment.role_label}`} placeholder="Payment note (optional)" value={details.payment_note} onChange={(event) => setPayoutDetails((current) => ({ ...current, [assignment.id]: { ...details, payment_note: event.target.value } }))} />
-                      <button className="btn-outline" onClick={() => handlePayoutDetails(assignment)} disabled={assignment.payout_status === 'paid'}>{assignment.payout_status === 'details_submitted' ? 'Update details' : 'Submit payment details'}</button>
-                    </div>
-                  </div>
-                })}
-              </div>}
-            </div>
-          )}
+          ) : <div style={{ color: 'var(--color-text-muted)' }}>Admin verification and payout release follow the cohort leaderboard.</div>}
         </section>
         <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
           <article className="card" style={{ borderTop: '3px solid #38bdf8' }}>
@@ -150,7 +109,7 @@ export default function MentorshipPage() {
             <h3 style={{ margin: '0.45rem 0' }}>Skills Coach · Zoom review</h3>
             <p style={{ color: 'var(--color-text-muted)', margin: '0.35rem 0' }}>Thursday, 7:00 PM EAT · 45 minutes</p>
             <p style={{ color: 'var(--color-text-muted)' }}>Assessment feedback, technical capability gaps, and the next certification recommendation.</p>
-            <button className="btn-outline" onClick={() => { createActivityNotification({ title: 'Zoom reminder scheduled', message: 'Your Skills Coach Zoom review is scheduled for Thursday at 7:00 PM EAT.', action_url: '/mentors', metadata: { event: 'zoom_reminder' } }).catch(() => {}); toast.success('Zoom reminder scheduled for Thursday at 7:00 PM EAT.') }}>Schedule Zoom reminder</button>
+            <button className="btn-outline" onClick={() => toast.success('Zoom reminder scheduled for Thursday at 7:00 PM EAT.')}>Schedule Zoom reminder</button>
           </article>
           <article className="card" style={{ borderTop: '3px solid #25d366' }}>
             <div style={{ color: '#25d366', fontSize: '0.78rem', textTransform: 'uppercase', fontWeight: 800 }}>Mentorship community</div>

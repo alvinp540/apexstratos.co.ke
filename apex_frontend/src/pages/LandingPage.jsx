@@ -175,17 +175,6 @@ export default function LandingPage() {
         </section>
 
         <section style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 1.25rem 4rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap', padding: '1.5rem', background: 'linear-gradient(120deg, rgba(34,197,94,0.16), rgba(56,189,248,0.1))', border: '1px solid rgba(134,239,172,0.25)', borderRadius: '1rem' }}>
-            <div style={{ maxWidth: '760px' }}>
-              <div style={{ color: '#86efac', fontSize: '0.72rem', letterSpacing: '0.14em', fontWeight: 800 }}>YOUR NEXT STEP</div>
-              <h2 style={{ margin: '0.35rem 0' }}>Join Apex and turn participation into proof.</h2>
-              <p style={{ color: '#cbd5e1', lineHeight: 1.6, margin: 0 }}>Explore the full Apex journey with audio guidance, then build a profile that can unlock stronger capability signals, account-based marketing, and better vendor opportunities.</p>
-            </div>
-            <button onClick={() => { setShowHowItWorks(true); navigate('/?watch=1&next=/register') }} style={{ background: '#22c55e', color: '#04111f', borderRadius: '0.75rem', padding: '0.85rem 1.3rem', fontWeight: 800 }}>Join Apex</button>
-          </div>
-        </section>
-
-        <section style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 1.25rem 4rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <div><div style={{ color: '#4ade80', fontSize: '0.75rem', letterSpacing: '0.15em', fontWeight: 800 }}>LIVE CAPABILITY STORIES</div><h2 style={{ fontSize: '2rem', marginTop: '0.35rem' }}>Proof from the network</h2><p style={{ marginTop: '0.35rem' }}>Real progress, shared by Business Nodes as capability turns into opportunity.</p></div>
             <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>{['All', 'Deployment', 'Mentorship', 'Certification'].map((filter) => <button key={filter} onClick={() => setActiveStory(filter)} style={{ background: activeStory === filter ? '#22c55e' : 'rgba(148,163,184,0.12)', color: activeStory === filter ? '#04111f' : '#dbeafe', padding: '0.45rem 0.75rem' }}>{filter}</button>)}</div>

@@ -46,7 +46,7 @@ export default function Navbar() {
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       height: '72px', boxShadow: '0 8px 20px rgba(2, 6, 23, 0.12)',
     }}>
-      <Link to="/" aria-label="Return to Apex home" style={{ fontWeight: 900, fontSize: '1.5rem', color: '#f3e8ff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+      <Link to="/" style={{ fontWeight: 900, fontSize: '1.5rem', color: '#f3e8ff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '26px', height: '26px', borderRadius: '8px', background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', fontSize: '0.9rem' }}>A</span>
         APEX 1.0
       </Link>
@@ -96,7 +96,7 @@ export default function Navbar() {
               <option>SW</option>
             </select>
             <Link to="/login"><button style={{ background: 'transparent', color: '#dbeafe', border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: '0.7rem', padding: '0.55rem 1rem', fontWeight: 700 }}>Login</button></Link>
-            <Link to="/?watch=1&next=/register"><button className="btn-primary" style={{ padding: '0.6rem 1.2rem', fontWeight: 800 }}>Join Apex</button></Link>
+            <Link to="/register"><button className="btn-primary" style={{ padding: '0.6rem 1.2rem', fontWeight: 800 }}>Join Apex</button></Link>
           </>
         )}
       </div>

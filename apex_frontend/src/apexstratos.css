@@ -1,0 +1,343 @@
+:root {
+  color-scheme: dark;
+  --bg: #070b14;
+  --panel: #0d1422;
+  --panel-hi: #111b2d;
+  --line: #24324a;
+  --line-strong: #344662;
+  --text: #f5f7fa;
+  --sub: #a2aec2;
+  --muted: #8e9aaf;
+  --lime: #6d8cff;
+  --lime-dim: #91a8ff;
+  --danger: #ff7777;
+  --success: #35d39a;
+  --warning: #f5c451;
+}
+
+body,
+.landing,
+.main-area {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  min-width: 0;
+}
+
+.sidebar,
+.mobile-brand,
+.mobile-nav {
+  background: var(--panel);
+}
+
+.brand-symbol,
+.nav-link.active,
+.button-primary {
+  border-color: var(--lime);
+}
+
+.button-primary {
+  background: var(--lime);
+  color: #070b14;
+}
+
+.button-primary:hover {
+  background: #91a8ff;
+  border-color: #91a8ff;
+  color: #070b14;
+}
+
+.landing-nav .brand,
+.landing-footer .brand {
+  white-space: nowrap;
+}
+
+.landing-menu {
+  display: none;
+  position: relative;
+}
+
+.landing-menu summary {
+  display: grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.landing-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-menu-links {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  min-width: 190px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-hi);
+  box-shadow: 0 12px 30px #0008;
+}
+
+.landing-menu:not([open]) .landing-menu-links {
+  display: none;
+}
+
+.landing-menu-links a {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 11px;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.landing-menu-links a:hover {
+  background: var(--panel);
+  color: var(--lime-dim);
+}
+
+.hero {
+  grid-template-columns: minmax(0, 1.15fr) minmax(270px, 0.85fr);
+  gap: clamp(28px, 6vw, 90px);
+}
+
+.hero h1 {
+  max-width: 760px;
+}
+
+.hero-support {
+  color: var(--text) !important;
+  font-size: clamp(18px, 2.2vw, 25px) !important;
+  font-weight: 600;
+  line-height: 1.4 !important;
+}
+
+.journey-card {
+  width: 100%;
+  max-width: 430px;
+  justify-self: end;
+  padding: clamp(20px, 3vw, 32px);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+
+.journey-card ol {
+  display: grid;
+  gap: 0;
+  margin-top: 18px;
+  list-style: none;
+}
+
+.journey-card li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 43px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.journey-card li + li {
+  border-top: 1px solid var(--line);
+}
+
+.journey-card li span,
+.step-card > span {
+  color: var(--lime-dim);
+  font: 10px var(--mono);
+}
+
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.step-card,
+.programme-note {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.step-card {
+  min-height: 164px;
+  padding: 20px;
+}
+
+.step-card h3 {
+  margin: 15px 0 8px;
+  font-size: 15px;
+}
+
+.step-card p,
+.programme-note p {
+  margin: 0;
+  color: var(--sub);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.programme-note {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.5fr) auto;
+  align-items: center;
+  gap: 25px;
+  margin-top: 14px;
+  padding: 22px;
+}
+
+.programme-note h2 {
+  margin: 8px 0 0;
+  font: 600 18px var(--display);
+}
+
+.discipline-card strong {
+  max-width: 100%;
+}
+
+.nav-link,
+.icon-button,
+.text-button,
+.mobile-nav a {
+  transition: color 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+
+:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+}
+
+.mobile-nav a {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (max-width: 900px) {
+  .steps-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .programme-note {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .contest-payment-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .contest-payment-form,
+  .contest-payment-status {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .landing-menu {
+    display: block;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .hero-copy {
+    padding-top: 46px;
+  }
+
+  .journey-card {
+    justify-self: stretch;
+    max-width: none;
+  }
+
+  .mobile-nav {
+    height: calc(66px + env(safe-area-inset-bottom));
+    padding: 3px 4px env(safe-area-inset-bottom);
+  }
+
+  .mobile-nav a {
+    width: 20%;
+    height: 52px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    font-size: 16px;
+  }
+
+  .mobile-nav small {
+    font-size: 9px;
+    line-height: 1.2;
+  }
+
+  .mobile-nav a.active {
+    color: var(--lime);
+  }
+
+  .content {
+    padding-bottom: calc(90px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 420px) {
+  .landing-nav .brand {
+    gap: 7px;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+  }
+
+  .landing-nav .brand small {
+    font-size: 7px;
+  }
+
+  .steps-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-footer {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 340px) {
+  .landing-nav {
+    gap: 6px;
+  }
+
+  .landing-nav .brand {
+    gap: 5px;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+
+  .landing-nav .brand-symbol {
+    width: 26px;
+    height: 26px;
+  }
+
+  .landing-nav nav {
+    gap: 5px;
+  }
+
+  .landing-nav .button {
+    min-height: 34px;
+    padding: 0 7px;
+    font-size: 9px;
+  }
+}

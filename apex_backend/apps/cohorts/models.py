@@ -1,6 +1,9 @@
 from django.db import models
+from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 import uuid
 from apps.accounts.models import User
+from .tutorial_schedule import CAPABILITY_FIELDS
 
 
 class Cohort(models.Model):
@@ -79,6 +82,132 @@ class Question(models.Model):
     class Meta:
         db_table = 'questions'
         ordering = ['order']
+
+
+class Tutorial(models.Model):
+    FIELD_CHOICES = [(field, field) for field in CAPABILITY_FIELDS]
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('in_review', 'In Review'),
+        ('approved', 'Approved'),
+        ('scheduled', 'Scheduled'),
+        ('published', 'Published'),
+        ('archived', 'Archived'),
+    ]
+    DIFFICULTY_CHOICES = [
+        ('foundation', 'Foundation'),
+        ('developing', 'Developing'),
+        ('integrated', 'Integrated'),
+    ]
+    WEEKDAY_CHOICES = [
+        (0, 'Monday'), (1, 'Tuesday'), (2, 'Wednesday'), (3, 'Thursday'),
+    ]
+    DAILY_SLOT_CHOICES = [(1, 'Tutorial 1'), (2, 'Tutorial 2')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    month = models.PositiveSmallIntegerField(validators=[MinValueValidator(1)])
+    week = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(4)])
+    day = models.PositiveSmallIntegerField(choices=WEEKDAY_CHOICES)
+    daily_slot = models.PositiveSmallIntegerField(choices=DAILY_SLOT_CHOICES)
+    field = models.CharField(max_length=40, choices=FIELD_CHOICES, db_index=True)
+    title = models.CharField(max_length=240)
+    description = models.TextField()
+    learning_objectives = models.JSONField(default=list)
+    concept_explanation = models.TextField(blank=True)
+    terminology_and_components = models.TextField(blank=True)
+    why_it_matters = models.TextField(blank=True)
+    how_it_works = models.TextField(blank=True)
+    worked_examples = models.TextField(blank=True)
+    common_mistakes = models.TextField(blank=True)
+    practical_application = models.TextField(blank=True)
+    decisions_and_tradeoffs = models.TextField(blank=True)
+    related_concepts = models.TextField(blank=True)
+    difficulty = models.CharField(max_length=16, choices=DIFFICULTY_CHOICES, default='foundation')
+    video = models.FileField(upload_to='tutorials/videos/%Y/%m/', blank=True)
+    duration_minutes = models.PositiveSmallIntegerField(null=True, blank=True)
+    related_assessment_ids = models.JSONField(default=list, blank=True)
+    scheduled_for = models.DateTimeField(db_index=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft', db_index=True)
+    expert_reviewed = models.BooleanField(default=False)
+    review_notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_tutorials')
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_tutorials')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'tutorials'
+        ordering = ['month', 'week', 'day', 'daily_slot', 'field']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['month', 'week', 'day', 'daily_slot', 'field'],
+                name='unique_tutorial_schedule_slot',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['field', 'month', 'week', 'day']),
+            models.Index(fields=['status', 'scheduled_for']),
+        ]
+
+    def validate_for_publication(self):
+        errors = {}
+        if not self.video:
+            errors['video'] = 'Upload an ApexStratos-owned video before publishing.'
+        teaching_sections = (
+            'concept_explanation', 'terminology_and_components', 'why_it_matters',
+            'how_it_works', 'worked_examples', 'common_mistakes',
+            'practical_application', 'decisions_and_tradeoffs', 'related_concepts',
+        )
+        missing_sections = [name for name in teaching_sections if not getattr(self, name).strip()]
+        if missing_sections:
+            errors['teaching_content'] = 'Complete all teaching sections: ' + ', '.join(missing_sections)
+        if not isinstance(self.learning_objectives, list) or len(self.learning_objectives) < 3:
+            errors['learning_objectives'] = 'Add at least three learning objectives.'
+        question_orders = list(self.questions.order_by('order').values_list('order', flat=True))
+        if question_orders != [1, 2, 3, 4, 5]:
+            errors['questions'] = 'A tutorial must have exactly five questions before publishing.'
+        if self.field in {'Medical and Health', 'Law and Society'} and not self.expert_reviewed:
+            errors['expert_reviewed'] = 'Medical and Health and Law and Society tutorials require expert review before publication.'
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f'M{self.month} W{self.week} {self.get_day_display()} / {self.field}: {self.title}'
+
+
+class TutorialQuestion(models.Model):
+    QUESTION_TYPE_CHOICES = [
+        ('multiple_choice', 'Multiple choice'),
+        ('scenario', 'Scenario'),
+        ('short_answer', 'Short answer'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tutorial = models.ForeignKey(Tutorial, on_delete=models.CASCADE, related_name='questions')
+    order = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES, default='multiple_choice')
+    prompt = models.TextField()
+    options = models.JSONField(default=list, blank=True)
+    correct_answer = models.TextField()
+    rationale = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'tutorial_questions'
+        ordering = ['order']
+        constraints = [
+            models.UniqueConstraint(fields=['tutorial', 'order'], name='unique_tutorial_question_order'),
+        ]
+
+    def clean(self):
+        if self.question_type == 'multiple_choice':
+            if not isinstance(self.options, list) or len(self.options) < 2:
+                raise ValidationError({'options': 'Multiple-choice questions need at least two options.'})
+            if self.correct_answer not in self.options:
+                raise ValidationError({'correct_answer': 'The correct answer must match one of the options.'})
+
+    def __str__(self):
+        return f'{self.tutorial.title} / Question {self.order}'
 
 
 class CohortEnrollment(models.Model):
@@ -262,3 +391,252 @@ class WhatsAppInviteRequest(models.Model):
                 name='one_pending_whatsapp_invite',
             ),
         ]
+
+
+class AssessmentSchedule(models.Model):
+    """
+    Defines the Fri-Sun assessment schedule for each field.
+    Friday through Sunday, 3 assessments per day per field.
+    Assessments are accessible during the Fri-Sun window but not time-locked to exact days.
+    """
+    WEEKDAY_CHOICES = [
+        (4, 'Friday'),
+        (5, 'Saturday'),
+        (6, 'Sunday'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    month = models.PositiveSmallIntegerField(validators=[MinValueValidator(1)])
+    week = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(4)])
+    day = models.PositiveSmallIntegerField(choices=WEEKDAY_CHOICES)
+    assessment_slot = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(3)],
+        help_text='Assessment 1, 2, or 3 for the day'
+    )
+    field = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
+    title = models.CharField(max_length=240)
+    description = models.TextField()
+    learning_objectives = models.JSONField(default=list)
+    video = models.FileField(upload_to='assessments/videos/%Y/%m/', blank=True)
+    duration_minutes = models.PositiveSmallIntegerField(default=20)
+    difficulty = models.CharField(
+        max_length=16,
+        choices=[('foundation', 'Foundation'), ('developing', 'Developing'), ('integrated', 'Integrated')],
+        default='foundation'
+    )
+    passing_score = models.FloatField(default=70.0)
+    status = models.CharField(
+        max_length=16,
+        choices=[
+            ('draft', 'Draft'),
+            ('in_review', 'In Review'),
+            ('approved', 'Approved'),
+            ('scheduled', 'Scheduled'),
+            ('published', 'Published'),
+            ('archived', 'Archived'),
+        ],
+        default='draft',
+        db_index=True
+    )
+    expert_reviewed = models.BooleanField(default=False)
+    review_notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_assessments')
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_assessments')
+    scheduled_for = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'assessment_schedules'
+        ordering = ['month', 'week', 'day', 'assessment_slot', 'field']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['month', 'week', 'day', 'assessment_slot', 'field'],
+                name='unique_assessment_schedule_slot',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['field', 'month', 'week', 'day']),
+            models.Index(fields=['status', 'scheduled_for']),
+        ]
+
+    def __str__(self):
+        day_name = dict(self.WEEKDAY_CHOICES).get(self.day, 'Unknown')
+        return f'M{self.month} W{self.week} {day_name} #{self.assessment_slot} / {self.field}: {self.title}'
+
+
+class AssessmentScheduleQuestion(models.Model):
+    """
+    Questions for AssessmentSchedule CAT assessments (Fri-Sun).
+    Exactly 5 MCQs per assessment.
+    """
+    QUESTION_TYPE_CHOICES = [
+        ('multiple_choice', 'Multiple choice'),
+        ('scenario', 'Scenario'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    assessment = models.ForeignKey(AssessmentSchedule, on_delete=models.CASCADE, related_name='questions')
+    order = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES, default='multiple_choice')
+    prompt = models.TextField()
+    options = models.JSONField(default=list, blank=True)
+    correct_answer = models.TextField()
+    rationale = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'assessment_schedule_questions'
+        ordering = ['order']
+        constraints = [
+            models.UniqueConstraint(fields=['assessment', 'order'], name='unique_assessment_question_order'),
+        ]
+
+    def clean(self):
+        if self.question_type == 'multiple_choice':
+            if not isinstance(self.options, list) or len(self.options) < 2:
+                raise ValidationError({'options': 'Multiple-choice questions need at least two options.'})
+            if self.correct_answer not in self.options:
+                raise ValidationError({'correct_answer': 'The correct answer must match one of the options.'})
+
+    def __str__(self):
+        return f'{self.assessment.title} / Question {self.order}'
+
+
+class ParticipationPayment(models.Model):
+    """
+    Tracks KSh 100 participation payments for accessing assessments.
+    Payment is a gating mechanism only; payment does not create merit or improve ranking.
+    Separate from escrow, coaching payouts, and subscription tiers.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending Verification'),
+        ('under_review', 'Under Review'),
+        ('verified', 'Verified'),
+        ('rejected', 'Rejected'),
+        ('expired', 'Expired'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='participation_payments')
+    full_name = models.CharField(max_length=200, blank=True)
+    phone_number = models.CharField(max_length=32, blank=True)
+    field = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
+    amount_kes = models.PositiveIntegerField(default=100)
+    till_number = models.CharField(max_length=20, default='1598106')
+    payment_reference = models.CharField(max_length=255, blank=True, null=True, unique=True)
+    mpesa_transaction_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    verification_notes = models.TextField(blank=True)
+    rejection_reason = models.TextField(blank=True)
+    verified_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='verified_participation_payments'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'participation_payments'
+        indexes = [
+            models.Index(fields=['user', 'field', 'status']),
+            models.Index(fields=['status', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.email} / {self.field} / {self.get_status_display()}'
+
+
+class ParticipationPaymentEvent(models.Model):
+    DECISION_CHOICES = [
+        ('submitted', 'Submitted'),
+        ('under_review', 'Under Review'),
+        ('verified', 'Verified'),
+        ('rejected', 'Rejected'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    payment = models.ForeignKey(
+        ParticipationPayment,
+        on_delete=models.PROTECT,
+        related_name='events',
+    )
+    actor = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='participation_payment_events',
+    )
+    decision = models.CharField(max_length=20, choices=DECISION_CHOICES, db_index=True)
+    notes = models.TextField(blank=True)
+    confirmed_transaction_id = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'participation_payment_events'
+        ordering = ['created_at']
+
+
+class AssessmentScheduleAttempt(models.Model):
+    """
+    Tracks individual attempts on AssessmentSchedule (Fri-Sun CAT) assessments.
+    Server-authoritative timer: started_at + duration_seconds determines validity.
+    Scoring is server-side only; student API does not expose correct answers or rationales.
+    """
+    STATUS_CHOICES = [
+        ('in_progress', 'In Progress'),
+        ('submitted', 'Submitted'),
+        ('graded', 'Graded'),
+        ('timed_out', 'Timed Out'),
+        ('abandoned', 'Abandoned'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='assessment_attempts')
+    assessment = models.ForeignKey(AssessmentSchedule, on_delete=models.CASCADE, related_name='attempts')
+    answers = models.JSONField(default=dict)
+    question_order = models.JSONField(default=list)
+    assessment_snapshot = models.JSONField(default=dict)
+    video_watched_seconds = models.PositiveIntegerField(default=0)
+    video_completed = models.BooleanField(default=False)
+    score = models.FloatField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_progress', db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    deadline_at = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField(default=1200)
+
+    tab_switches = models.PositiveIntegerField(default=0)
+    time_anomalies = models.PositiveIntegerField(default=0)
+    ip_address = models.GenericIPAddressField(null=True)
+    user_agent = models.TextField(blank=True)
+    is_flagged = models.BooleanField(default=False, db_index=True)
+    flag_reason = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'assessment_schedule_attempts'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'assessment'],
+                name='unique_schedule_attempt_per_user',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'assessment']),
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['status', 'started_at']),
+        ]
+
+    @property
+    def is_time_expired(self):
+        """Check the fixed attempt or contest-cycle deadline server-side."""
+        from django.utils import timezone
+        deadline = self.deadline_at or (
+            self.started_at + timezone.timedelta(seconds=self.duration_seconds)
+        )
+        return timezone.now() >= deadline
+
+    def __str__(self):
+        return f'{self.user.email} / {self.assessment.title} / {self.get_status_display()}'

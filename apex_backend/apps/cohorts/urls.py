@@ -8,9 +8,26 @@ from .views import (
     CoachPayoutView,
     MentorshipFollowUpView,
     WhatsAppInviteRequestView, WhatsAppInviteReviewView,
+    TutorialListView, TutorialDetailView,
+)
+from .programme_views import (
+    ContestAssessmentListView,
+    ParticipationPaymentAdminListView,
+    ParticipationPaymentDecisionView,
+    ParticipationPaymentListCreateView,
+    StartContestAssessmentView,
+    SubmitContestAssessmentView,
 )
 
 urlpatterns = [
+    path('tutorials/', TutorialListView.as_view(), name='tutorial-list'),
+    path('tutorials/<uuid:tutorial_id>/', TutorialDetailView.as_view(), name='tutorial-detail'),
+    path('payments/main-contest/', ParticipationPaymentListCreateView.as_view(), name='main-contest-payment-list'),
+    path('admin/payments/main-contest/', ParticipationPaymentAdminListView.as_view(), name='main-contest-payment-admin-list'),
+    path('admin/payments/main-contest/<uuid:payment_id>/decision/', ParticipationPaymentDecisionView.as_view(), name='main-contest-payment-decision'),
+    path('contests/', ContestAssessmentListView.as_view(), name='contest-assessment-list'),
+    path('contests/<uuid:assessment_id>/start/', StartContestAssessmentView.as_view(), name='contest-assessment-start'),
+    path('contests/attempts/<uuid:attempt_id>/submit/', SubmitContestAssessmentView.as_view(), name='contest-assessment-submit'),
     path('', CohortListView.as_view()),
     path('today/', DailyAvailableCohortsView.as_view()),
     path('<uuid:cohort_id>/', CohortDetailView.as_view()),

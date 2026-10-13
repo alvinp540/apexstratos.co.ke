@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Navbar from '../components/common/Navbar'
-import { getPosts } from '../api/socialAPI'
 
 const communities = [
   { name: 'AI Engineering', members: '1,284', activity: '12 new discussions', color: '#a78bfa', topics: 'Expert discussions · Weekly challenges · Capability news' },
@@ -13,8 +12,6 @@ const communities = [
 
 export default function CommunitiesPage() {
   const [query, setQuery] = useState('')
-  const [posts, setPosts] = useState([])
-  useEffect(() => { getPosts().then(({ data }) => setPosts(data)).catch(() => {}) }, [])
   const filtered = communities.filter((community) => community.name.toLowerCase().includes(query.toLowerCase()))
   return (
     <>
@@ -30,7 +27,6 @@ export default function CommunitiesPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.8rem' }}>
             {filtered.map((community) => <article className="card" key={community.name} style={{ borderLeft: `4px solid ${community.color}`, minHeight: '170px' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}><h3>{community.name}</h3><span style={{ color: community.color }}>●</span></div><p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5 }}>{community.topics}</p><div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '1rem' }}><span>{community.members} nodes</span><span>{community.activity}</span></div></article>)}
           </div>
-          {posts.length > 0 && <div style={{ marginTop: '2rem' }}><h3>Latest community activity</h3>{posts.slice(0, 5).map((post) => <article className="card" key={post.id} style={{ marginTop: '0.6rem' }}><strong>{post.author_name}</strong><p style={{ color: 'var(--color-text-muted)' }}>{post.body}</p></article>)}</div>}
         </section>
       </main>
     </>

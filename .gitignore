@@ -1,0 +1,29 @@
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python environments and generated files
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Local databases and generated uploads
+apex_backend/db.sqlite3
+apex_backend/db.sqlite3-*
+*.sqlite3-journal
+apex_backend/media/
+apex_backend/staticfiles/
+
+# Installed dependencies and build output
+node_modules/
+**/node_modules/
+apex_frontend/dist/
+
+# Local worktrees
+apex_frontend.worktrees/

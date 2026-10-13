@@ -17,5 +17,15 @@ export const runMentorshipFollowUp = (cohortId) =>
   api.post(`/cohorts/admin/${cohortId}/mentorship-follow-up/`)
 export const listWhatsAppInvites = () => api.get('/cohorts/mentorship/whatsapp-invites/')
 export const requestWhatsAppInvite = (payload) => api.post('/cohorts/mentorship/whatsapp-invites/', payload)
-export const requestCoachPayout = () => api.post('/cohorts/coach-payouts/')
-export const updateCoachPayoutDetails = (assignmentId, payload) => api.patch(`/cohorts/coach-payouts/${assignmentId}/`, payload)
+
+export const getMainContestPayments = () => api.get('/cohorts/payments/main-contest/')
+export const submitMainContestPayment = (payload) => api.post('/cohorts/payments/main-contest/', payload)
+export const getMainContestAssessments = () => api.get('/cohorts/contests/')
+export const startMainContestAssessment = (assessmentId) =>
+  api.post(`/cohorts/contests/${assessmentId}/start/`)
+export const submitMainContestAttempt = (attemptId, answers) =>
+  api.post(`/cohorts/contests/attempts/${attemptId}/submit/`, { answers })
+export const getMainContestPaymentReviews = () =>
+  api.get('/cohorts/admin/payments/main-contest/')
+export const decideMainContestPayment = (paymentId, payload) =>
+  api.post(`/cohorts/admin/payments/main-contest/${paymentId}/decision/`, payload)

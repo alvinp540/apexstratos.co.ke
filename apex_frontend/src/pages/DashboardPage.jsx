@@ -89,7 +89,6 @@ export default function DashboardPage() {
               {dailyCohorts.length > 0 && (
                 <div style={{ marginTop: '0.6rem', padding: '0.8rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0.8rem' }}>
                   <div style={{ fontWeight: 800, marginBottom: '0.45rem' }}>Today's recommended cohorts</div>
-                  <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginBottom: '0.45rem' }}>Daily participation limit: 6 cohorts</div>
                   {dailyCohorts.slice(0, 6).map((c) => (
                     <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0' }}>
                       <div style={{ fontSize: '0.9rem' }}>{c.title} <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>{c.profession}</div></div>

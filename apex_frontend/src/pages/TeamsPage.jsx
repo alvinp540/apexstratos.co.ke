@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Navbar from '../components/common/Navbar'
 import toast from 'react-hot-toast'
-import { createActivityNotification } from '../api/notificationAPI'
 
 const consortiums = [
   { name: 'Manufacturing Consortium', skills: 'Robotics · Mechanical · AI · Electrical · Safety', merit: '94.8', deployments: 187, tone: '#f97316' },
@@ -13,18 +12,9 @@ export default function TeamsPage() {
   const [teamName, setTeamName] = useState('')
   const [teams, setTeams] = useState([])
 
-  useEffect(() => {
-    try { setTeams(JSON.parse(localStorage.getItem('apex_teams') || '[]')) } catch { setTeams([]) }
-  }, [])
-
   const createTeam = () => {
     if (!teamName.trim()) return
-    setTeams((current) => {
-      const next = [...current, { name: teamName.trim(), members: 1, merit: '—' }]
-      localStorage.setItem('apex_teams', JSON.stringify(next))
-      return next
-    })
-    createActivityNotification({ title: 'Team created', message: `${teamName.trim()} is ready for verified members and capability planning.`, action_url: '/teams', metadata: { event: 'team_created' } }).catch(() => {})
+    setTeams((current) => [...current, { name: teamName.trim(), members: 1, merit: '—' }])
     setTeamName('')
     toast.success('Team created. You can invite verified members next.')
   }
