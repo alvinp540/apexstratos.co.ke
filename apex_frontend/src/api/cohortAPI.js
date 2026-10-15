@@ -6,8 +6,8 @@ export const getCohort = (id) => api.get(`/cohorts/${id}/`)
 export const enrollCohort = (id) => api.post(`/cohorts/${id}/enroll/`)
 export const getAssessments = (cohortId) => api.get(`/cohorts/${cohortId}/assessments/`)
 export const startAssessment = (assessmentId) => api.post(`/cohorts/assessments/${assessmentId}/start/`)
-export const submitAssessment = (assessmentId, answers, videoData) =>
-  api.post(`/cohorts/assessments/${assessmentId}/submit/`, { answers, ...videoData })
+export const submitAssessment = (assessmentId, answers) =>
+  api.post(`/cohorts/assessments/${assessmentId}/submit/`, { answers })
 export const getCohortLeaderboard = (cohortId) => api.get(`/cohorts/${cohortId}/leaderboard/`)
 export const sendHeartbeat = (attemptId, data) =>
   api.post(`/cohorts/attempts/${attemptId}/heartbeat/`, data)
@@ -21,11 +21,21 @@ export const requestWhatsAppInvite = (payload) => api.post('/cohorts/mentorship/
 export const getMainContestPayments = () => api.get('/cohorts/payments/main-contest/')
 export const submitMainContestPayment = (payload) => api.post('/cohorts/payments/main-contest/', payload)
 export const getMainContestAssessments = () => api.get('/cohorts/contests/')
+export const getMainContestLibrary = (params = {}) => api.get('/cohorts/contests/library/', { params })
 export const startMainContestAssessment = (assessmentId) =>
   api.post(`/cohorts/contests/${assessmentId}/start/`)
-export const submitMainContestAttempt = (attemptId, answers) =>
-  api.post(`/cohorts/contests/attempts/${attemptId}/submit/`, { answers })
+export const saveMainContestAttemptAnswers = (attemptId, answers, reasoning = {}) =>
+  api.post(`/cohorts/contests/attempts/${attemptId}/answers/`, { answers, reasoning })
+export const submitMainContestAttempt = (attemptId, answers, reasoning = {}) =>
+  api.post(`/cohorts/contests/attempts/${attemptId}/submit/`, { answers, reasoning })
 export const getMainContestPaymentReviews = () =>
   api.get('/cohorts/admin/payments/main-contest/')
 export const decideMainContestPayment = (paymentId, payload) =>
   api.post(`/cohorts/admin/payments/main-contest/${paymentId}/decision/`, payload)
+export const getSupportPrograms = () => api.get('/cohorts/support/programs/')
+export const getSupportApplications = () => api.get('/cohorts/support/applications/')
+export const applyForSupportProgram = (programId, payload) =>
+  api.post(`/cohorts/support/programs/${programId}/applications/`, payload)
+export const getAdminSupportApplications = () => api.get('/cohorts/admin/support/applications/')
+export const decideSupportApplication = (applicationId, payload) =>
+  api.post(`/cohorts/admin/support/applications/${applicationId}/decision/`, payload)

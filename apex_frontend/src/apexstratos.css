@@ -225,6 +225,248 @@ body {
   min-height: 44px;
 }
 
+.library-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-hi);
+}
+
+.library-summary strong {
+  color: var(--lime-dim);
+}
+
+.library-summary span {
+  color: var(--sub);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.contest-library-panel {
+  margin-bottom: 16px;
+}
+
+.contest-library-panel .filter-row {
+  margin: 16px 0;
+}
+
+.contest-library-panel .tutorial-card .button {
+  min-height: 44px;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.tutorial-question {
+  min-width: 0;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.tutorial-question legend {
+  max-width: 100%;
+  padding: 0 5px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.tutorial-question label {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  color: var(--sub);
+  cursor: pointer;
+  line-height: 1.45;
+}
+
+.tutorial-question input {
+  flex: 0 0 auto;
+  accent-color: var(--lime);
+}
+
+.written-reasoning {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--sub);
+  font-size: 12px;
+}
+
+.written-reasoning textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-hi);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.written-reasoning textarea:focus-visible {
+  border-color: var(--lime);
+  outline: 2px solid var(--lime);
+  outline-offset: 2px;
+}
+
+.tutorial-question .written-reasoning {
+  align-items: start;
+}
+
+.support-programme-section,
+.support-applications-section,
+.support-vendor-opportunities {
+  margin: 24px 0;
+}
+
+.support-programme-list,
+.support-application-list,
+.admin-support-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.support-programme-card,
+.support-application-status,
+.admin-support-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.support-programme-card h3,
+.support-applications-section h2 {
+  margin: 12px 0 7px;
+}
+
+.support-programme-card > p,
+.support-vendor-opportunities > p {
+  color: var(--sub);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.support-programme-facts {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  color: var(--sub);
+  font-size: 11px;
+}
+
+.support-eligibility-rules {
+  padding: 10px;
+  border-left: 2px solid var(--lime);
+  background: var(--panel-hi);
+}
+
+.support-application-form {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.support-application-form > p {
+  margin: 0;
+  color: var(--sub);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.support-application-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--sub);
+  font-size: 11px;
+}
+
+.support-application-form input,
+.admin-support-card input,
+.admin-support-card select,
+.admin-support-card textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-hi);
+  color: var(--text);
+  font: inherit;
+}
+
+.support-application-form input:focus-visible,
+.admin-support-card input:focus-visible,
+.admin-support-card select:focus-visible,
+.admin-support-card textarea:focus-visible {
+  border-color: var(--lime);
+  outline: 2px solid var(--lime);
+  outline-offset: 2px;
+}
+
+.support-application-status {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--sub);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.support-application-status p {
+  margin: 0;
+}
+
+.support-not-eligible {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.admin-support-applications {
+  margin: 24px 0;
+  padding: 18px;
+}
+
+.admin-support-summary {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-support-summary span,
+.admin-support-summary small {
+  color: var(--sub);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.admin-support-card .admin-review-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-support-card .admin-review-form label:last-of-type {
+  grid-column: 1 / -1;
+}
+
+.admin-support-card textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
 @media (max-width: 900px) {
   .steps-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -237,6 +479,14 @@ body {
 
   .contest-payment-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-support-card .admin-review-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-support-card .admin-review-form label:last-of-type {
+    grid-column: auto;
   }
 
   .contest-payment-form,

@@ -57,6 +57,56 @@ QUESTIONS = [
         ],
         'correct_answer': 'A working solution supported by tests, clear reasoning, and measured improvement.',
     },
+    {
+        'text': 'A service intermittently returns stale records after a write. Which evidence should guide the first investigation?',
+        'options': [
+            'Trace the write and read paths, cache invalidation, and consistency guarantees.',
+            'Increase the client-side animation duration.',
+            'Disable all cache headers without measuring their effect.',
+            'Retry the request indefinitely from every client.',
+        ],
+        'correct_answer': 'Trace the write and read paths, cache invalidation, and consistency guarantees.',
+    },
+    {
+        'text': 'A team proposes storing an authorization role only in a browser-controlled field. What is the key risk?',
+        'options': [
+            'A client can modify the field, so the server must make the authorization decision.',
+            'The browser will render the field in the wrong font.',
+            'The role will always be hidden from administrators.',
+            'The database will automatically encrypt the field.',
+        ],
+        'correct_answer': 'A client can modify the field, so the server must make the authorization decision.',
+    },
+    {
+        'text': 'A database migration must add a required field while old and new application versions overlap. What is the safest sequence?',
+        'options': [
+            'Add it compatibly, backfill, deploy code using it, then enforce the constraint.',
+            'Make it non-null immediately and let old writes fail.',
+            'Delete existing rows before deploying the new version.',
+            'Skip the migration and edit production schema manually.',
+        ],
+        'correct_answer': 'Add it compatibly, backfill, deploy code using it, then enforce the constraint.',
+    },
+    {
+        'text': 'A model evaluation shows high overall accuracy but poor results for a small subgroup. What should happen next?',
+        'options': [
+            'Investigate subgroup metrics and data quality before deployment.',
+            'Ignore subgroup results because aggregate accuracy is high.',
+            'Remove the subgroup from the test set.',
+            'Deploy first and collect no further evidence.',
+        ],
+        'correct_answer': 'Investigate subgroup metrics and data quality before deployment.',
+    },
+    {
+        'text': 'A release improves latency but increases the error rate for one critical operation. Which decision is best?',
+        'options': [
+            'Compare impact against the service objectives and roll back or mitigate if the objective is breached.',
+            'Keep the release because average latency improved.',
+            'Hide the error metric from the dashboard.',
+            'Increase the timeout and stop investigating.',
+        ],
+        'correct_answer': 'Compare impact against the service objectives and roll back or mitigate if the objective is breached.',
+    },
 ]
 
 
@@ -93,8 +143,7 @@ class Command(BaseCommand):
             cohort=cohort,
             title='Advanced Software Engineering Competition Assessment',
             defaults={
-                'instructions': 'Watch the lesson, then solve the cross-functional software questions using evidence from the lesson.',
-                'video_url': '/static/videos/video_1.mp4',
+                'instructions': 'Use the scenario details, technical evidence, and stated constraints to select the strongest response.',
                 'time_limit_minutes': 30,
                 'difficulty': 'expert',
                 'passing_score': 70,

@@ -152,8 +152,6 @@ class Tutorial(models.Model):
 
     def validate_for_publication(self):
         errors = {}
-        if not self.video:
-            errors['video'] = 'Upload an ApexStratos-owned video before publishing.'
         teaching_sections = (
             'concept_explanation', 'terminology_and_components', 'why_it_matters',
             'how_it_works', 'worked_examples', 'common_mistakes',
@@ -164,9 +162,17 @@ class Tutorial(models.Model):
             errors['teaching_content'] = 'Complete all teaching sections: ' + ', '.join(missing_sections)
         if not isinstance(self.learning_objectives, list) or len(self.learning_objectives) < 3:
             errors['learning_objectives'] = 'Add at least three learning objectives.'
-        question_orders = list(self.questions.order_by('order').values_list('order', flat=True))
-        if question_orders != [1, 2, 3, 4, 5]:
-            errors['questions'] = 'A tutorial must have exactly five questions before publishing.'
+        questions = list(self.questions.order_by('order'))
+        if [question.order for question in questions] != list(range(1, 11)):
+            errors['questions'] = 'A tutorial must have exactly ten questions numbered 1 through 10 before publishing.'
+        else:
+            for question in questions:
+                try:
+                    question.full_clean()
+                except ValidationError as error:
+                    errors[f'question_{question.order}'] = error.messages
+                if question.question_type != 'multiple_choice':
+                    errors[f'question_{question.order}'] = 'Every published tutorial question must be multiple choice.'
         if self.field in {'Medical and Health', 'Law and Society'} and not self.expert_reviewed:
             errors['expert_reviewed'] = 'Medical and Health and Law and Society tutorials require expert review before publication.'
         if errors:
@@ -185,12 +191,13 @@ class TutorialQuestion(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tutorial = models.ForeignKey(Tutorial, on_delete=models.CASCADE, related_name='questions')
-    order = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    order = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES, default='multiple_choice')
     prompt = models.TextField()
     options = models.JSONField(default=list, blank=True)
     correct_answer = models.TextField()
     rationale = models.TextField(blank=True)
+    requires_reasoning = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'tutorial_questions'
@@ -208,6 +215,64 @@ class TutorialQuestion(models.Model):
 
     def __str__(self):
         return f'{self.tutorial.title} / Question {self.order}'
+
+
+class TutorialAttempt(models.Model):
+    STATUS_CHOICES = [
+        ('in_progress', 'In Progress'),
+        ('graded', 'Graded'),
+        ('timed_out', 'Timed Out'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tutorial_attempts')
+    tutorial = models.ForeignKey(Tutorial, on_delete=models.PROTECT, related_name='attempts')
+    question_snapshot = models.JSONField(default=list)
+    answers = models.JSONField(default=dict)
+    score = models.FloatField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='in_progress', db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'tutorial_attempts'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'tutorial'],
+                condition=models.Q(status='in_progress'),
+                name='one_active_tutorial_attempt',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'tutorial', 'started_at']),
+            models.Index(fields=['user', 'status']),
+        ]
+
+
+class TutorialProgress(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tutorial_progress')
+    tutorial = models.ForeignKey(Tutorial, on_delete=models.PROTECT, related_name='progress')
+    last_attempt = models.ForeignKey(
+        TutorialAttempt,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='progress_records',
+    )
+    best_score = models.FloatField(default=0)
+    attempt_count = models.PositiveIntegerField(default=0)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'tutorial_progress'
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'tutorial'], name='unique_user_tutorial_progress'),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'completed_at']),
+        ]
 
 
 class CohortEnrollment(models.Model):
@@ -468,8 +533,8 @@ class AssessmentSchedule(models.Model):
 
 class AssessmentScheduleQuestion(models.Model):
     """
-    Questions for AssessmentSchedule CAT assessments (Fri-Sun).
-    Exactly 5 MCQs per assessment.
+    Questions for question-first programme assessments.
+    Published assessments contain exactly ten ordered multiple-choice questions.
     """
     QUESTION_TYPE_CHOICES = [
         ('multiple_choice', 'Multiple choice'),
@@ -478,12 +543,13 @@ class AssessmentScheduleQuestion(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     assessment = models.ForeignKey(AssessmentSchedule, on_delete=models.CASCADE, related_name='questions')
-    order = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    order = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES, default='multiple_choice')
     prompt = models.TextField()
     options = models.JSONField(default=list, blank=True)
     correct_answer = models.TextField()
     rationale = models.TextField(blank=True)
+    requires_reasoning = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'assessment_schedule_questions'
@@ -640,3 +706,149 @@ class AssessmentScheduleAttempt(models.Model):
 
     def __str__(self):
         return f'{self.user.email} / {self.assessment.title} / {self.get_status_display()}'
+
+
+class SupportProgram(models.Model):
+    TYPE_CHOICES = [
+        ('opportunity', 'Opportunity'),
+        ('cash_award', 'Cash award'),
+        ('sponsored_view_reward', 'Sponsored View reward'),
+        ('philanthropic_support', 'Philanthropic support'),
+        ('sponsored_contest_access', 'Sponsored contest access'),
+        ('short_term_payout', 'Short-term payout'),
+    ]
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('published', 'Published'),
+        ('closed', 'Closed'),
+    ]
+    FUNDING_CHOICES = [
+        ('awaiting_funding', 'Awaiting funding'),
+        ('funded', 'Funded'),
+        ('closed', 'Funding closed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    program_type = models.CharField(max_length=32, choices=TYPE_CHOICES, db_index=True)
+    eligibility_rules = models.TextField()
+    merit_cutoff = models.FloatField(
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text='Cutoff applied to the average of completed, unflagged Main Contest assessment scores.',
+    )
+    funding_status = models.CharField(max_length=24, choices=FUNDING_CHOICES, default='awaiting_funding')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft', db_index=True)
+    deadline = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_support_programs'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'support_programs'
+        ordering = ['deadline', 'title']
+
+    def __str__(self):
+        return self.title
+
+
+class SupportEligibility(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='support_eligibilities')
+    program = models.ForeignKey(SupportProgram, on_delete=models.PROTECT, related_name='eligibilities')
+    merit_score = models.FloatField()
+    merit_cutoff_at_eligibility = models.FloatField()
+    completed_contests = models.PositiveIntegerField()
+    tutorial_consistency_weeks = models.PositiveSmallIntegerField(default=0)
+    eligible = models.BooleanField(default=True, db_index=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'support_eligibilities'
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'program'], name='unique_user_support_eligibility'),
+        ]
+        indexes = [
+            models.Index(fields=['program', 'eligible', '-merit_score']),
+        ]
+
+
+class SupportApplication(models.Model):
+    STATUS_CHOICES = [
+        ('submitted', 'Submitted'),
+        ('under_review', 'Under Review'),
+        ('approved', 'Approved'),
+        ('awaiting_funding', 'Awaiting Funding'),
+        ('payment_processing', 'Payment Processing'),
+        ('paid', 'Paid'),
+        ('declined', 'Declined'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='support_applications')
+    program = models.ForeignKey(SupportProgram, on_delete=models.PROTECT, related_name='applications')
+    eligibility = models.ForeignKey(
+        SupportEligibility, on_delete=models.PROTECT, related_name='applications'
+    )
+    program_title_at_application = models.CharField(max_length=200)
+    program_type_at_application = models.CharField(max_length=32, choices=SupportProgram.TYPE_CHOICES)
+    eligibility_rules_at_application = models.TextField()
+    merit_cutoff_at_application = models.FloatField()
+    full_name = models.CharField(max_length=200)
+    registered_phone_number = models.CharField(max_length=20)
+    mpesa_number = models.CharField(max_length=20)
+    merit_score_at_application = models.FloatField()
+    tutorial_consistency_weeks_at_application = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='submitted', db_index=True)
+    admin_reason = models.TextField(blank=True)
+    payment_reference = models.CharField(max_length=255, blank=True)
+    reviewed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_support_applications'
+    )
+    payment_confirmed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='confirmed_support_payments'
+    )
+    payment_confirmed_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'support_applications'
+        ordering = ['-merit_score_at_application', '-tutorial_consistency_weeks_at_application', 'submitted_at']
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'program'], name='unique_user_support_application'),
+            models.UniqueConstraint(
+                fields=['payment_reference'],
+                condition=~models.Q(payment_reference=''),
+                name='unique_support_payment_reference',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['program', 'status', 'submitted_at']),
+            models.Index(fields=['user', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.email} / {self.program.title} / {self.get_status_display()}'
+
+
+class SupportApplicationEvent(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.ForeignKey(
+        SupportApplication, on_delete=models.PROTECT, related_name='events'
+    )
+    actor = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='support_application_events'
+    )
+    status = models.CharField(max_length=24, choices=SupportApplication.STATUS_CHOICES)
+    reason = models.TextField(blank=True)
+    payment_reference = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'support_application_events'
+        ordering = ['created_at']

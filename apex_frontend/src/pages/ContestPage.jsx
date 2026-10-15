@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Page from '../components/Page'
 import { Empty, ErrorState, Loading } from '../components/States'
+import WeeklyScheduleNotice from '../components/WeeklyScheduleNotice'
 import { useAuth } from '../context/AuthContext'
 import { studyAreas } from '../data'
 import {
   decideMainContestPayment,
   getMainContestAssessments,
+  getMainContestLibrary,
   getMainContestPaymentReviews,
   getMainContestPayments,
+  saveMainContestAttemptAnswers,
   startMainContestAssessment,
   submitMainContestAttempt,
   submitMainContestPayment,
@@ -18,7 +21,7 @@ import { getErrorMessage, unwrapList } from '../api/client'
 function formatDate(value) {
   if (!value) return 'Not provided'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? 'Not provided' : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? 'Not provided' : date.toLocaleString(undefined, { timeZone: 'Africa/Nairobi' })
 }
 
 function contestDay(value) {
@@ -61,24 +64,36 @@ export default function ContestPage() {
   const [profile, setProfile] = useState(null)
   const [payments, setPayments] = useState([])
   const [contests, setContests] = useState([])
+  const [libraryItems, setLibraryItems] = useState([])
+  const [libraryCount, setLibraryCount] = useState(0)
+  const [libraryFilters, setLibraryFilters] = useState({ field: '', week: '' })
+  const [libraryLoading, setLibraryLoading] = useState(true)
+  const [libraryError, setLibraryError] = useState('')
   const [adminPayments, setAdminPayments] = useState([])
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(true)
   const [activeAssessment, setActiveAssessment] = useState(null)
   const [activeAttempt, setActiveAttempt] = useState(null)
   const [answers, setAnswers] = useState({})
+  const [reasoning, setReasoning] = useState({})
   const [paymentForm, setPaymentForm] = useState({ full_name: '', field: '', payment_reference: '' })
   const [paymentSubmitted, setPaymentSubmitted] = useState(false)
   const [paymentBusy, setPaymentBusy] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [reviewBusy, setReviewBusy] = useState('')
   const answersRef = useRef({})
+  const reasoningRef = useRef({})
   const activeRef = useRef(null)
   const expiredRef = useRef(false)
 
   const updateAnswers = (next) => {
     answersRef.current = next
     setAnswers(next)
+  }
+
+  const updateReasoning = (next) => {
+    reasoningRef.current = next
+    setReasoning(next)
   }
 
   const load = useCallback(async () => {
@@ -112,6 +127,23 @@ export default function ContestPage() {
 
   useEffect(() => { load() }, [load])
 
+  const loadLibrary = useCallback(async () => {
+    setLibraryLoading(true)
+    setLibraryError('')
+    try {
+      const params = Object.fromEntries(Object.entries(libraryFilters).filter(([, value]) => value))
+      const { data } = await getMainContestLibrary(params)
+      setLibraryItems(unwrapList(data))
+      setLibraryCount(data?.count ?? unwrapList(data).length)
+    } catch (error) {
+      setLibraryError(getErrorMessage(error))
+    } finally {
+      setLibraryLoading(false)
+    }
+  }, [libraryFilters.field, libraryFilters.week])
+
+  useEffect(() => { loadLibrary() }, [loadLibrary])
+
   const refreshContests = useCallback(async () => {
     try {
       const { data } = await getMainContestAssessments()
@@ -131,6 +163,7 @@ export default function ContestPage() {
     activeRef.current = null
     expiredRef.current = false
     updateAnswers({})
+    updateReasoning({})
   }, [])
 
   const expireAttempt = useCallback(async () => {
@@ -139,7 +172,7 @@ export default function ContestPage() {
     setSubmitting(true)
     let terminal = false
     try {
-      await submitMainContestAttempt(activeRef.current.id, answersRef.current)
+      await submitMainContestAttempt(activeRef.current.id, answersRef.current, reasoningRef.current)
       terminal = true
     } catch (error) {
       terminal = error.response?.status === 410 || error.response?.status === 409
@@ -156,6 +189,19 @@ export default function ContestPage() {
 
   const timer = useContestCountdown(activeAttempt, expireAttempt)
 
+  useEffect(() => {
+    if (!activeAttempt || activeAttempt.status !== 'in_progress' || submitting) return undefined
+    const saveTimer = window.setTimeout(() => {
+      saveMainContestAttemptAnswers(activeAttempt.id, answers, reasoning)
+        .catch((error) => {
+          if (![409, 410].includes(error.response?.status)) {
+            setErrors((current) => ({ ...current, attempt: getErrorMessage(error) }))
+          }
+        })
+    }, 500)
+    return () => window.clearTimeout(saveTimer)
+  }, [activeAttempt?.id, activeAttempt?.status, answers, reasoning, submitting])
+
   const openAttempt = (assessment, attempt) => {
     if (!attempt?.id || !attempt.deadline_at || !attempt.server_time) {
       setErrors((current) => ({ ...current, attempt: 'The server did not return a usable attempt deadline. Reload the contest list before continuing.' }))
@@ -171,6 +217,7 @@ export default function ContestPage() {
     setActiveAssessment(assessment)
     setActiveAttempt(attempt)
     updateAnswers(attempt.answers || {})
+    updateReasoning(attempt.reasoning || {})
   }
 
   const startContest = async (assessment) => {
@@ -193,7 +240,7 @@ export default function ContestPage() {
     if (!activeAttempt || !activeAssessment || timer === '00:00' || timer === '—') return
     setSubmitting(true)
     try {
-      const { data } = await submitMainContestAttempt(activeAttempt.id, answers)
+      const { data } = await submitMainContestAttempt(activeAttempt.id, answers, reasoning)
       setContests((current) => current.map((contest) => contest.id === activeAssessment.id
         ? { ...contest, attempt: { ...contest.attempt, ...data } }
         : contest))
@@ -284,6 +331,12 @@ export default function ContestPage() {
   const phone = user?.phone_number || profile?.phone_number || ''
 
   return <Page eyebrow="PRACTICE & CHALLENGE" title="Main contests" description="Contest assessments and payment requests shown here come from Apex. The server controls access, contest windows, attempt deadlines, and scores.">
+    <section className="panel contest-library-panel">
+      <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST LIBRARY</div><h2>KSh 100 per applicable access period</h2><p>Each published assessment contains ten questions. Payment verification grants field-specific access; the 20-minute timer starts only when the server accepts your start action during the Friday–Sunday window.</p></div><span className="contest-price">{libraryCount} matching</span></div>
+      <WeeklyScheduleNotice activity="main_contest" />
+      <div className="filter-row"><label>Study area<select value={libraryFilters.field} onChange={(event) => setLibraryFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All study areas</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label><label>Week<select value={libraryFilters.week} onChange={(event) => setLibraryFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><button className="button button-quiet" onClick={loadLibrary}>↻ Refresh library</button></div>
+      {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <div className="content-grid">{libraryItems.map((assessment) => <article className="tutorial-card" key={assessment.id}><div className="tutorial-card-top"><span className="tag">{assessment.field}</span><span className="tag">Week {assessment.week}</span></div><h3>{assessment.title}</h3><p>{assessment.description}</p><div className="tutorial-meta"><span>10 questions · 20 minutes</span><span>{assessment.attempt?.status === 'graded' ? `Completed · ${assessment.attempt.score}%` : assessment.attempt?.status === 'timed_out' ? 'Attempt expired' : assessment.can_start ? 'Available now · EAT' : `Next opening: ${formatDate(assessment.next_opening_at)}`}</span></div>{(!assessment.attempt || assessment.attempt.status === 'in_progress') && <button className="button button-primary" disabled={!assessment.can_start} onClick={() => startContest(assessment)}>{assessment.attempt?.status === 'in_progress' ? 'Resume assessment' : assessment.can_start ? 'Start assessment' : 'Requires verified access and Friday–Sunday window'}</button>}</article>)}</div>}
+    </section>
     <section className="panel contest-payment-panel">
       <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST ACCESS</div><h2>Payment review</h2><p>Submit your KSh 100 M-Pesa reference for the official study area you want to enter. Payment is reviewed by an administrator and does not add merit.</p></div><span className="contest-price">KES 100</span></div>
       {errors.profile && <div className="alert alert-error" role="alert">Profile details could not be loaded. Your registered phone and name will be validated by the server when you submit.</div>}
@@ -306,10 +359,10 @@ export default function ContestPage() {
       </div>
     </section>
 
-    {activeAttempt && activeAssessment ? <ContestAttempt assessment={activeAssessment} attempt={activeAttempt} answers={answers} onAnswer={(questionId, answer) => updateAnswers({ ...answersRef.current, [questionId]: answer })} onSubmit={submitAnswers} onExit={closeAttempt} onExpireRetry={expireAttempt} timer={timer} submitting={submitting} error={errors.attempt} /> : <section className="contest-assessment-section">
-      <div className="contest-section-heading"><div><div className="eyebrow">ASSESSMENT WINDOW</div><h2>Available contest assessments</h2><p>Only assessments currently returned by the server are listed. Availability depends on published schedules, payment verification, field, and the active contest window.</p></div><button className="button button-quiet" onClick={refreshContests}>↻ Refresh</button></div>
+    {activeAttempt && activeAssessment ? <ContestAttempt assessment={activeAssessment} attempt={activeAttempt} answers={answers} reasoning={reasoning} onAnswer={(questionId, answer) => updateAnswers({ ...answersRef.current, [questionId]: answer })} onReasoning={(questionId, text) => updateReasoning({ ...reasoningRef.current, [questionId]: text })} onSubmit={submitAnswers} onExit={closeAttempt} onExpireRetry={expireAttempt} timer={timer} submitting={submitting} error={errors.attempt} /> : <section className="contest-assessment-section">
+      <div className="contest-section-heading"><div><div className="eyebrow">ASSESSMENT WINDOW</div><h2>Contest assessments and results</h2><p>Published assessments and previous results remain visible. New attempts can only start Friday through Sunday EAT after field-specific payment verification.</p></div><button className="button button-quiet" onClick={refreshContests}>↻ Refresh</button></div>
       {errors.attempt && <div className="alert alert-error" role="alert">{errors.attempt}</div>}
-      {errors.contests ? <ErrorState message={errors.contests} retry={refreshContests} /> : loading ? <Loading label="Checking the contest window…" /> : contests.length === 0 ? <Empty title="No assessments currently available">There are no contest assessments available to this account right now. The server only lists assessments for an active published contest window.</Empty> : <div className="content-grid contest-card-grid">{contests.map((assessment) => <ContestCard key={assessment.id} assessment={assessment} onStart={startContest} onResume={openAttempt} />)}</div>}
+      {errors.contests ? <ErrorState message={errors.contests} retry={refreshContests} /> : loading ? <Loading label="Loading published assessments and results…" /> : contests.length === 0 ? <Empty title="No published assessments or previous results">There are no published main-contest assessments for verified fields or previous attempts on this account.</Empty> : <div className="content-grid contest-card-grid">{contests.map((assessment) => <ContestCard key={assessment.id} assessment={assessment} onStart={startContest} onResume={openAttempt} />)}</div>}
     </section>}
 
     {user?.is_admin && <AdminPaymentReviews payments={adminPayments} loading={loading} error={errors.adminPayments || errors.adminDecision} onRetry={load} onReview={reviewPayment} busyId={reviewBusy} />}
@@ -323,27 +376,27 @@ function ContestCard({ assessment, onStart, onResume }) {
   return <article className="contest-card">
     <div className="contest-card-top"><span className="tag">{assessment.field}</span><span className="contest-slot">{contestDay(assessment.day)} · SLOT {assessment.assessment_slot}</span></div>
     <h3>{assessment.title}</h3><p>{assessment.description}</p>
-    <div className="contest-facts"><span>{assessment.duration_minutes} minutes</span><span>Window closes {formatDate(assessment.window_closes_at)}</span></div>
+    <div className="contest-facts"><span>{assessment.duration_minutes} minutes</span><span>{assessment.can_start ? `Window closes ${formatDate(assessment.window_closes_at)}` : `Next opening ${formatDate(assessment.next_opening_at)}`}</span></div>
     {submitted && <div className="contest-result"><span>Server result</span><strong>{attempt.score ?? '—'}%</strong><small>{attempt.is_flagged ? 'Flagged for review' : 'Submitted'} · {formatDate(attempt.submitted_at)}</small></div>}
     {attempt && !inProgress && !submitted && <div className="contest-expired">Attempt status: {attempt.status?.replaceAll('_', ' ') || 'unavailable'}. This attempt cannot be restarted.</div>}
-    {inProgress ? <button className="button button-primary" onClick={() => onResume(assessment, attempt)}>Resume attempt <span>↗</span></button> : !attempt && <button className="button button-primary" onClick={() => onStart(assessment)}>Start assessment <span>↗</span></button>}
+    {inProgress ? <button className="button button-primary" disabled={!assessment.can_start} onClick={() => onResume(assessment, attempt)}>Resume attempt <span>↗</span></button> : !attempt && <button className="button button-primary" disabled={!assessment.can_start} onClick={() => onStart(assessment)}>{assessment.can_start ? 'Start assessment' : 'Opens Friday' } <span>↗</span></button>}
   </article>
 }
 
-function ContestAttempt({ assessment, attempt, answers, onAnswer, onSubmit, onExit, onExpireRetry, timer, submitting, error }) {
+function ContestAttempt({ assessment, attempt, answers, reasoning, onAnswer, onReasoning, onSubmit, onExit, onExpireRetry, timer, submitting, error }) {
   const deadlineUnavailable = timer === '—'
   const expired = timer === '00:00'
+  const missingReasoning = attempt.questions?.some((question) => question.requires_reasoning && !reasoning[question.id]?.trim())
   return <section className="panel contest-attempt">
     <div className="contest-attempt-heading"><div><div className="eyebrow">{assessment.field} · LIVE ATTEMPT</div><h2>{attempt.title || assessment.title}</h2><p>{attempt.description || assessment.description}</p></div><div className={`contest-timer${expired ? ' timer-expired' : ''}`}><small>SERVER DEADLINE</small><strong>{timer}</strong><span>{formatDate(attempt.deadline_at)}</span></div></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {deadlineUnavailable && <div className="alert alert-error" role="alert">A server deadline was not provided, so this attempt cannot be answered safely. Reload the contest list or contact support.</div>}
-    {attempt.video_url && <div className="contest-video"><video controls preload="metadata" src={attempt.video_url}>Your browser does not support embedded video.</video></div>}
     {attempt.questions?.length ? <div className="contest-question-list">{attempt.questions.map((question, index) => <fieldset key={question.id} className="contest-question" disabled={expired || deadlineUnavailable || submitting}><legend><span>QUESTION {index + 1} OF {attempt.questions.length}</span>{question.prompt}</legend><div className="contest-options">{(question.options || []).map((option, optionIndex) => {
       const value = String(option)
       return <label className={answers[question.id] === value ? 'selected' : ''} key={`${question.id}-${optionIndex}`}><input type="radio" name={`contest-question-${question.id}`} value={value} checked={answers[question.id] === value} onChange={() => onAnswer(question.id, value)} /><span>{value}</span></label>
-    })}</div></fieldset>)}</div> : <Empty title="Questions were not returned">Reload the contest list before continuing.</Empty>}
+    })}</div>{question.requires_reasoning && <label className="written-reasoning">Written reasoning<textarea value={reasoning[question.id] || ''} onChange={(event) => onReasoning(question.id, event.target.value)} disabled={expired || deadlineUnavailable || submitting} required maxLength={5000} /></label>}</fieldset>)}</div> : <Empty title="Questions were not returned">Reload the contest list before continuing.</Empty>}
     {expired && <div className="contest-expired" role="status">The server deadline has passed. The server must confirm the final attempt status.{error && <button className="text-button" onClick={onExpireRetry} disabled={submitting}>Retry deadline check</button>}</div>}
-    <div className="contest-attempt-actions"><button className="button button-quiet" onClick={onExit} disabled={submitting}>Leave attempt</button><button className="button button-primary" onClick={onSubmit} disabled={submitting || expired || deadlineUnavailable || !attempt.questions?.length}>{submitting ? 'Submitting…' : 'Submit answers'} <span>↗</span></button></div>
+    <div className="contest-attempt-actions"><button className="button button-quiet" onClick={onExit} disabled={submitting}>Leave attempt</button><button className="button button-primary" onClick={onSubmit} disabled={submitting || expired || deadlineUnavailable || !attempt.questions?.length || missingReasoning}>{submitting ? 'Submitting…' : 'Submit answers'} <span>↗</span></button></div>
   </section>
 }
 

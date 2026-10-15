@@ -3,7 +3,16 @@ import { Link, useParams } from 'react-router-dom'
 import api, { getErrorMessage, unwrapList } from '../api/client'
 import { studyAreas } from '../data'
 import Page from '../components/Page'
-import { Empty, ErrorState, Loading, Unavailable } from '../components/States'
+import { Empty, ErrorState, Loading } from '../components/States'
+import WeeklyScheduleNotice from '../components/WeeklyScheduleNotice'
+import { useAuth } from '../context/AuthContext'
+import {
+  applyForSupportProgram,
+  decideSupportApplication,
+  getAdminSupportApplications,
+  getSupportApplications,
+  getSupportPrograms,
+} from '../api/cohortAPI'
 
 export function StudyAreas() {
   return <Page eyebrow="LEARN AT YOUR PACE" title="Choose a discipline" description="Explore an area to see published tutorials currently available from Apex.">
@@ -15,6 +24,7 @@ export function StudyAreas() {
 export function Tutorials() {
   const [params, setParams] = useState({ field: '', month: '', week: '' })
   const [items, setItems] = useState([])
+  const [total, setTotal] = useState(0)
   const [status, setStatus] = useState({ loading: true, error: '' })
   const load = async () => {
     setStatus({ loading: true, error: '' })
@@ -22,6 +32,7 @@ export function Tutorials() {
       const query = Object.fromEntries(Object.entries(params).filter(([, value]) => value))
       const { data } = await api.get('/cohorts/tutorials/', { params: query })
       setItems(unwrapList(data))
+      setTotal(data?.count ?? unwrapList(data).length)
     } catch (error) {
       setStatus({ loading: false, error: getErrorMessage(error) })
       return
@@ -30,9 +41,11 @@ export function Tutorials() {
   }
   useEffect(() => { load() }, [params.field, params.month, params.week])
   const update = (event) => setParams({ ...params, [event.target.name]: event.target.value })
-  return <Page eyebrow="LEARNING LIBRARY" title="Tutorials" description="Published lessons from the Apex learning library. Content is shown only when returned by the platform.">
-    <div className="filter-row"><label>Discipline<select name="field" value={params.field} onChange={update}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Month<input aria-label="Month" name="month" type="number" min="1" max="12" placeholder="Any" value={params.month} onChange={update} /></label><label>Week<input aria-label="Week" name="week" type="number" min="1" max="4" placeholder="Any" value={params.week} onChange={update} /></label></div>
-    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorials found">Try another discipline or come back when lessons are published.</Empty> : <div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div>}
+  return <Page eyebrow="LEARNING LIBRARY" title="Tutorial Library" description="Free written lessons and ten-question assessments, organized by study area and week.">
+    <WeeklyScheduleNotice activity="tutorials" />
+    <div className="library-summary"><strong>Free</strong><span>{total} matching published assessments · initial target 640 assessments / 6,400 questions</span></div>
+    <div className="filter-row"><label>Study area<select name="field" value={params.field} onChange={update}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={params.week} onChange={update}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label></div>
+    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorial assessments match these filters">The database currently has no published tutorial assessments for this selection.</Empty> : <div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div>}
   </Page>
 }
 
@@ -40,24 +53,27 @@ export function AreaTutorials() {
   const { area } = useParams()
   const field = decodeURIComponent(area || '')
   const [items, setItems] = useState([])
+  const [week, setWeek] = useState('')
   const [status, setStatus] = useState({ loading: true, error: '' })
   const load = async () => {
     setStatus({ loading: true, error: '' })
     try {
-      const { data } = await api.get('/cohorts/tutorials/', { params: { field } })
+      const { data } = await api.get('/cohorts/tutorials/', { params: { field, ...(week ? { week } : {}) } })
       setItems(unwrapList(data))
       setStatus({ loading: false, error: '' })
     } catch (error) { setStatus({ loading: false, error: getErrorMessage(error) }) }
   }
-  useEffect(() => { load() }, [field])
+  useEffect(() => { load() }, [field, week])
   return <Page eyebrow="STUDY AREA" title={field} description="Published lessons available for this discipline.">
+    <WeeklyScheduleNotice activity="tutorials" />
     <Link className="back-link inline-back" to="/study">← All study areas</Link>
-    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published lessons in this area yet">Apex will show tutorials here when they are published for {field}.</Empty> : <div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div>}
+    <div className="filter-row"><label>Week<select value={week} onChange={(event) => setWeek(event.target.value)}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label></div>
+    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published tutorial assessments match this selection">The database currently has no published tutorial assessments for {field}.</Empty> : <div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div>}
   </Page>
 }
 
 function TutorialCard({ tutorial }) {
-  return <Link to={`/tutorials/${tutorial.id}`} className="tutorial-card"><div className="tutorial-card-top"><span className="tag">{tutorial.field}</span><span className="card-arrow">↗</span></div><h2>{tutorial.title}</h2><p>{tutorial.description}</p><div className="tutorial-meta"><span>{tutorial.difficulty || 'Lesson'}</span><span>{tutorial.duration_minutes ? `${tutorial.duration_minutes} min` : 'Duration not listed'}</span></div></Link>
+  return <Link to={`/tutorials/${tutorial.id}`} className="tutorial-card"><div className="tutorial-card-top"><span className="tag">{tutorial.field}</span><span className="card-arrow">↗</span></div><h2>{tutorial.title}</h2><p>{tutorial.description}</p><div className="tutorial-meta"><span>Week {tutorial.week}</span><span>{tutorial.progress?.completed ? `Completed · best ${tutorial.progress.best_score}%` : `${tutorial.questions?.length || 10} questions · Free`}</span></div></Link>
 }
 
 export function TutorialDetail() {
@@ -81,12 +97,94 @@ export function TutorialDetail() {
   ].filter(([, value]) => value)
   return <Page eyebrow={item.field} title={item.title} description={item.description}>
     <Link className="back-link inline-back" to={`/study/${encodeURIComponent(item.field)}`}>← Back to {item.field}</Link>
-    <div className="lesson-meta"><span className="tag">{item.difficulty}</span><span>Month {item.month} · Week {item.week}</span><span>{item.duration_minutes ? `${item.duration_minutes} minutes` : 'Duration not listed'}</span></div>
-    {item.video_url && <div className="video-frame"><video controls preload="metadata" src={item.video_url}>Your browser does not support embedded video.</video></div>}
+    <div className="lesson-meta"><span className="tag">{item.difficulty}</span><span>Week {item.week}</span><span>Free · 10 questions</span>{item.progress?.completed && <span>Completed · best score {item.progress.best_score}%</span>}</div>
     {item.learning_objectives?.length > 0 && <section className="lesson-section"><div className="eyebrow">LEARNING OBJECTIVES</div><ul>{item.learning_objectives.map((objective, index) => <li key={`${index}-${objective}`}>{objective}</li>)}</ul></section>}
-    {sections.length > 0 ? <div className="lesson-sections">{sections.map(([heading, content]) => <section className="lesson-section" key={heading}><h2>{heading}</h2><p>{content}</p></section>)}</div> : !item.video_url && <Unavailable title="Lesson content not available">This tutorial currently has no published lesson content.</Unavailable>}
-    {item.questions?.length > 0 && <section className="lesson-section"><div className="eyebrow">CHECK YOUR UNDERSTANDING</div>{item.questions.map((question, index) => <div className="question-preview" key={question.id}><strong>{index + 1}. {question.prompt}</strong><ul>{question.options?.map((option, optionIndex) => <li key={optionIndex}>{option}</li>)}</ul></div>)}</section>}
+    {sections.length > 0 && <div className="lesson-sections">{sections.map(([heading, content]) => <section className="lesson-section" key={heading}><h2>{heading}</h2><p>{content}</p></section>)}</div>}
+    <WeeklyScheduleNotice activity="tutorials" />
+    <TutorialAssessment tutorial={item} onComplete={load} />
   </Page>
+}
+
+function TutorialAssessment({ tutorial, onComplete }) {
+  const [attempt, setAttempt] = useState(tutorial.current_attempt || null)
+  const [answers, setAnswers] = useState(tutorial.current_attempt?.answers || {})
+  const [reasoning, setReasoning] = useState(tutorial.current_attempt?.reasoning || {})
+  const [remaining, setRemaining] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (tutorial.current_attempt?.id && tutorial.current_attempt.id !== attempt?.id) {
+      setAttempt(tutorial.current_attempt)
+      setAnswers(tutorial.current_attempt.answers || {})
+      setReasoning(tutorial.current_attempt.reasoning || {})
+    }
+  }, [tutorial.current_attempt?.id, attempt?.id])
+
+  useEffect(() => {
+    if (!attempt?.deadline_at || !attempt?.server_time || attempt.status !== 'in_progress') {
+      setRemaining(null)
+      return undefined
+    }
+    const deadline = Date.parse(attempt.deadline_at)
+    const offset = Date.parse(attempt.server_time) - Date.now()
+    if (!Number.isFinite(deadline) || !Number.isFinite(offset)) return undefined
+    const update = () => setRemaining(Math.max(0, Math.ceil((deadline - (Date.now() + offset)) / 1000)))
+    update()
+    const timer = window.setInterval(update, 1000)
+    return () => window.clearInterval(timer)
+  }, [attempt?.id, attempt?.deadline_at, attempt?.server_time, attempt?.status])
+
+  useEffect(() => {
+    if (attempt?.status !== 'in_progress') return undefined
+    const timer = window.setTimeout(() => {
+      api.post(`/cohorts/tutorial-attempts/${attempt.id}/answers/`, { answers, reasoning })
+        .catch((requestError) => {
+          if (![409, 410].includes(requestError.response?.status)) setError(getErrorMessage(requestError))
+        })
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [attempt?.id, attempt?.status, answers, reasoning])
+
+  const start = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await api.post(`/cohorts/tutorials/${tutorial.id}/attempts/`)
+      setAttempt(data)
+      setAnswers(data.answers || {})
+      setReasoning(data.reasoning || {})
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submit = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await api.post(`/cohorts/tutorial-attempts/${attempt.id}/submit/`, { answers, reasoning })
+      setAttempt(data)
+      onComplete()
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!attempt) return <section className="lesson-section"><div className="eyebrow">ASSESSMENT</div><h2>Check your understanding</h2><p>Complete the ten-question assessment to save your progress. One attempt is allowed; refresh or reconnect to resume an active attempt.</p><button className="button button-primary" onClick={start} disabled={busy || !tutorial.can_start}>{busy ? 'Opening assessment…' : tutorial.can_start ? 'Start assessment' : 'Opens Monday–Thursday'}</button>{error && <p role="alert">{error}</p>}</section>
+  const complete = attempt.questions.length === 10 && attempt.questions.every((question) =>
+    answers[question.id] && (!question.requires_reasoning || reasoning[question.id]?.trim()),
+  )
+  return <section className="lesson-section"><div className="eyebrow">ASSESSMENT · {attempt.status === 'graded' ? `SCORE ${attempt.score}%` : attempt.status === 'timed_out' ? 'TIME EXPIRED' : '10 QUESTIONS'}</div><h2>{attempt.status === 'graded' ? 'Assessment results' : attempt.status === 'timed_out' ? 'Attempt expired' : 'Choose the best answer'}</h2>
+    {attempt.status === 'in_progress' && <p role="timer">Time remaining: {remaining === null ? '—' : `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`} · deadline is enforced by the server.</p>}
+    {attempt.questions.map((question) => <fieldset className="tutorial-question" key={question.id}><legend>{question.order}. {question.prompt}</legend>{question.options.map((option) => <label key={option}><input type="radio" name={question.id} value={option} checked={answers[question.id] === option} disabled={attempt.status === 'graded'} onChange={() => setAnswers((current) => ({ ...current, [question.id]: option }))} />{option}</label>)}{question.requires_reasoning && <label className="written-reasoning">Written reasoning<textarea value={reasoning[question.id] || ''} onChange={(event) => setReasoning((current) => ({ ...current, [question.id]: event.target.value }))} disabled={attempt.status === 'graded'} required maxLength={5000} /></label>}{question.rationale && <p>{question.rationale}</p>}{question.written_reasoning && <p>Your reasoning: {question.written_reasoning}</p>}</fieldset>)}
+    {attempt.status === 'in_progress' && <button className="button button-primary" onClick={submit} disabled={busy || !complete || remaining === 0}>{busy ? 'Submitting…' : 'Submit answers'}</button>}
+    {error && <p role="alert">{error}</p>}
+  </section>
 }
 
 export function Mentorship() {
@@ -112,18 +210,148 @@ export function Mentorship() {
 }
 
 export function Opportunities() {
+  const { user } = useAuth()
   const [jobs, setJobs] = useState([])
   const [status, setStatus] = useState({ loading: true, error: '' })
-  const load = () => {
+  const [programs, setPrograms] = useState([])
+  const [applications, setApplications] = useState([])
+  const [adminApplications, setAdminApplications] = useState([])
+  const [supportStatus, setSupportStatus] = useState({ loading: true, error: '' })
+  const [adminError, setAdminError] = useState('')
+  const [forms, setForms] = useState({})
+  const [busyId, setBusyId] = useState('')
+  const [formError, setFormError] = useState('')
+  const loadJobs = () => {
     setStatus({ loading: true, error: '' })
     api.get('/vendor/opportunities/').then(({ data }) => { setJobs(unwrapList(data)); setStatus({ loading: false, error: '' }) }).catch((error) => setStatus({ loading: false, error: getErrorMessage(error) }))
   }
-  useEffect(() => { load() }, [])
-  return <Page eyebrow="NEXT STEPS" title="Opportunities" description="Open opportunities currently returned by the Apex platform. Eligibility and selection remain with the platform.">
-    {status.loading ? <Loading label="Looking for open opportunities…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : jobs.length === 0 ? <Empty title="No open opportunities right now">There are no open roles to display. Check back later.</Empty> : <div className="content-grid">{jobs.map((job) => <article key={job.id} className="opportunity-card"><div className="tutorial-card-top"><span className="tag">{job.profession_required}</span><span className="job-status">{job.status}</span></div><h2>{job.title}</h2><p>{job.description}</p><div className="budget">{job.currency || 'KES'} {job.budget_min ?? '—'} – {job.budget_max ?? '—'}</div><div className="tag-row">{(job.skills_required || []).map((skill) => <span key={skill} className="tag">{skill}</span>)}</div><div className="job-details"><span>Minimum merit: {job.min_trust_score ?? 0}</span><span>{job.deadline ? `Deadline ${new Date(job.deadline).toLocaleDateString()}` : 'No deadline listed'}</span></div></article>)}</div>}
+  const loadSupport = async () => {
+    setSupportStatus({ loading: true, error: '' })
+    try {
+      const [programResult, applicationResult] = await Promise.all([
+        getSupportPrograms(),
+        getSupportApplications(),
+      ])
+      setPrograms(unwrapList(programResult.data))
+      setApplications(unwrapList(applicationResult.data))
+      setSupportStatus({ loading: false, error: '' })
+    } catch (error) {
+      setSupportStatus({ loading: false, error: getErrorMessage(error) })
+    }
+    if (user?.is_admin) {
+      try {
+        const { data } = await getAdminSupportApplications()
+        setAdminApplications(unwrapList(data))
+        setAdminError('')
+      } catch (error) {
+        setAdminError(getErrorMessage(error))
+      }
+    }
+  }
+  useEffect(() => { loadJobs(); loadSupport() }, [user?.is_admin])
+
+  const updateForm = (programId, key, value) => {
+    setForms((current) => ({
+      ...current,
+      [programId]: { ...current[programId], [key]: value },
+    }))
+  }
+  const submitApplication = async (event, program) => {
+    event.preventDefault()
+    setBusyId(program.id)
+    setFormError('')
+    try {
+      const form = forms[program.id] || {}
+      await applyForSupportProgram(program.id, {
+        full_name: form.full_name || '',
+        registered_phone_number: form.registered_phone_number || '',
+        mpesa_number: form.mpesa_number || '',
+      })
+      setForms((current) => ({ ...current, [program.id]: {} }))
+      await loadSupport()
+    } catch (error) {
+      setFormError(getErrorMessage(error))
+    } finally {
+      setBusyId('')
+    }
+  }
+  const reviewApplication = async (applicationId, payload) => {
+    setBusyId(applicationId)
+    setAdminError('')
+    try {
+      await decideSupportApplication(applicationId, payload)
+      await loadSupport()
+    } catch (error) {
+      setAdminError(getErrorMessage(error))
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  return <Page eyebrow="NEXT STEPS" title="Eligible Opportunities & Support" description="Review published programme rules, apply when eligible, and track every review and payment status. Eligibility does not guarantee funding or payout.">
+    <section className="support-programme-section">
+      <div className="contest-section-heading"><div><div className="eyebrow">MERIT-BASED SUPPORT</div><h2>Eligible Opportunities & Support</h2><p>Each programme publishes its own merit cutoff and funding status. Eligibility uses completed, unflagged Main Contest assessment averages; tutorial consistency is recorded as a tie-break factor.</p></div><button className="button button-quiet" onClick={loadSupport}>↻ Refresh</button></div>
+      {supportStatus.loading ? <Loading label="Checking published programmes and eligibility…" /> : supportStatus.error ? <ErrorState message={supportStatus.error} retry={loadSupport} /> : programs.length === 0 ? <Empty title="No published support programmes">No opportunity, reward, sponsorship, or payout programme is currently published.</Empty> : <div className="support-programme-list">{programs.map((program) => {
+        const application = program.application || applications.find((item) => item.program === program.id)
+        const form = forms[program.id] || {}
+        return <article className="support-programme-card" key={program.id}>
+          <div className="tutorial-card-top"><span className="tag">{program.program_type.replaceAll('_', ' ')}</span><span className={`contest-status status-${application?.status || (program.eligible ? 'eligible' : 'pending')}`}>{application?.status?.replaceAll('_', ' ') || (program.eligible ? 'Eligible to apply' : 'Not yet eligible')}</span></div>
+          <h3>{program.title}</h3><p>{program.description}</p>
+          <div className="support-programme-facts"><span>Published merit cutoff: {program.merit_cutoff}%</span><span>Your Main Contest merit: {program.merit_score}% ({program.completed_contests} eligible assessments)</span><span>Tutorial consistency: {program.tutorial_consistency_weeks} of 8 weeks</span><span>Funding: {program.funding_status.replaceAll('_', ' ')}</span>{program.deadline && <span>Deadline: {new Date(program.deadline).toLocaleString()}</span>}</div>
+          <p className="support-eligibility-rules"><strong>Eligibility rules:</strong> {program.eligibility_rules}</p>
+          {application ? <div className="support-application-status"><strong>Application status: {application.status.replaceAll('_', ' ')}</strong>{application.admin_reason && <p>{application.admin_reason}</p>}{application.payment_reference && <p>Payment reference: {application.payment_reference}</p>}{application.payment_confirmed_at && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}</div> : program.eligible && program.funding_status !== 'closed' ? <form className="support-application-form" onSubmit={(event) => submitApplication(event, program)}>
+            <h4>Application and payment details</h4><p>Submitting an application requests review; it does not guarantee selection, funding, or payment.</p>
+            <label>Registered full name<input required maxLength={200} autoComplete="name" value={form.full_name ?? user?.full_name ?? ''} onChange={(event) => updateForm(program.id, 'full_name', event.target.value)} /></label>
+            <label>Registered phone number<input required maxLength={20} autoComplete="tel" value={form.registered_phone_number ?? user?.phone_number ?? ''} onChange={(event) => updateForm(program.id, 'registered_phone_number', event.target.value)} /></label>
+            <label>M-Pesa number for this programme<input required maxLength={20} autoComplete="tel" value={form.mpesa_number || ''} onChange={(event) => updateForm(program.id, 'mpesa_number', event.target.value)} /></label>
+            {formError && <div className="alert alert-error" role="alert">{formError}</div>}
+            <button className="button button-primary" type="submit" disabled={busyId === program.id}>{busyId === program.id ? 'Submitting…' : 'Submit application'}</button>
+          </form> : program.funding_status === 'closed' ? <p className="support-not-eligible">This programme is not accepting applications because its funding is closed.</p> : <p className="support-not-eligible">Your verified Main Contest average has not reached this programme’s cutoff. Complete contest assessments; payment and attempt count do not increase merit.</p>}
+        </article>
+      })}</div>}
+    </section>
+    <section className="support-applications-section"><div className="eyebrow">YOUR RECORDS</div><h2>Applications & payment status</h2>{applications.length ? <div className="support-application-list">{applications.map((application) => <article className="support-application-status" key={application.id}><strong>{application.program_title}</strong><span>{application.status.replaceAll('_', ' ')}</span><small>Submitted {new Date(application.submitted_at).toLocaleString()}</small>{application.admin_reason && <p>{application.admin_reason}</p>}{application.payment_reference && <p>Payment reference: {application.payment_reference}</p>}{application.payment_confirmed_at && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}</article>)}</div> : <Empty title="No applications submitted">Eligible forms appear with published programmes above. Your application history will be kept here.</Empty>}</section>
+    {user?.is_admin && <AdminSupportApplications applications={adminApplications} error={adminError} busyId={busyId} onReview={reviewApplication} onRetry={loadSupport} />}
+    <section className="support-vendor-opportunities"><div className="eyebrow">SEPARATE PAID-WORK FEATURE</div><h2>Vendor-listed work</h2><p>These vendor job listings are separate from merit awards, philanthropic support, sponsored access, and programme payouts.</p>
+      {status.loading ? <Loading label="Loading vendor work…" /> : status.error ? <ErrorState message={status.error} retry={loadJobs} /> : jobs.length === 0 ? <Empty title="No vendor work listed">There are no vendor job listings available to this account right now.</Empty> : <div className="content-grid">{jobs.map((job) => <article key={job.id} className="opportunity-card"><div className="tutorial-card-top"><span className="tag">{job.profession_required}</span><span className="job-status">{job.status}</span></div><h2>{job.title}</h2><p>{job.description}</p><div className="budget">{job.currency || 'KES'} {job.budget_min ?? '—'} – {job.budget_max ?? '—'}</div><div className="tag-row">{(job.skills_required || []).map((skill) => <span key={skill} className="tag">{skill}</span>)}</div><div className="job-details"><span>Minimum merit: {job.min_trust_score ?? 0}</span><span>{job.deadline ? `Deadline ${new Date(job.deadline).toLocaleDateString()}` : 'No deadline listed'}</span></div></article>)}</div>}
+    </section>
   </Page>
 }
 
+function AdminSupportApplications({ applications, error, busyId, onReview, onRetry }) {
+  return <section className="panel admin-support-applications"><div className="contest-section-heading"><div><div className="eyebrow">ADMIN ONLY · PRIVATE DETAILS</div><h2>Support application review</h2><p>Verify applicant details, record a decision and reason, and confirm payment with a unique reference.</p></div><button className="button button-quiet" onClick={onRetry}>↻ Refresh</button></div>
+    {error && <ErrorState message={error} retry={onRetry} />}
+    {!error && applications.length === 0 ? <Empty title="No support applications submitted">Eligible applications appear here after submission.</Empty> : <div className="admin-support-list">{applications.map((application) => <SupportApplicationReview key={application.id} application={application} busy={busyId === application.id} onReview={onReview} />)}</div>}
+  </section>
+}
+
+const supportTransitions = {
+  submitted: ['under_review', 'declined'],
+  under_review: ['approved', 'awaiting_funding', 'declined'],
+  approved: ['awaiting_funding', 'payment_processing', 'declined'],
+  awaiting_funding: ['payment_processing', 'declined'],
+  payment_processing: ['paid', 'declined'],
+}
+
+function SupportApplicationReview({ application, busy, onReview }) {
+  const [form, setForm] = useState({ status: application.status, admin_reason: application.admin_reason || '', payment_reference: application.payment_reference || '' })
+  const submit = (event) => {
+    event.preventDefault()
+    onReview(application.id, form)
+  }
+  return <article className="admin-support-card"><div className="admin-support-summary"><div><strong>{application.program_title} · {application.full_name}</strong><span>Registered phone: {application.registered_phone_number} · M-Pesa: {application.mpesa_number}</span><small>Merit {application.merit_score_at_application}% · tutorial consistency {application.tutorial_consistency_weeks_at_application}/8 · {application.status.replaceAll('_', ' ')}</small></div></div>
+    <form className="admin-review-form" onSubmit={submit}><label>Decision<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value={application.status}>{application.status.replaceAll('_', ' ')}</option>{(supportTransitions[application.status] || []).map((nextStatus) => <option key={nextStatus} value={nextStatus}>{nextStatus.replaceAll('_', ' ')}</option>)}</select></label>
+      <label>Payment reference<input value={form.payment_reference} onChange={(event) => setForm({ ...form, payment_reference: event.target.value })} /></label>
+      <label>Decision reason<textarea value={form.admin_reason} onChange={(event) => setForm({ ...form, admin_reason: event.target.value })} required={form.status === 'declined'} /></label>
+      <button className="button button-primary" type="submit" disabled={busy || !supportTransitions[application.status]?.includes(form.status) && form.status !== application.status}>{busy ? 'Saving…' : 'Save review'}</button>
+    </form>
+  </article>
+}
+
 export function SponsoredView() {
-  return <Page eyebrow="SPONSORED VIEW" title="Your focused feed" description="Apex displays sponsored content only when it is supplied by an active platform service."><Unavailable title="Sponsored content is not connected">There is no sponsored-content API in the current backend. No promotions or funding have been fabricated here.</Unavailable><div className="sponsored-blank" aria-label="No sponsored content is currently connected"><span>◈</span><strong>Space reserved for verified partner content</strong><small>No placements are currently available.</small></div></Page>
+  return <Page eyebrow="SPONSORED VIEW" title="Sponsored View Library" description="KSh 20 per attempt. Results and any reward remain subject to published rules, validation, funding, and approval.">
+    <WeeklyScheduleNotice activity="sponsored_view" />
+    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Maximum five attempts per student per day, Monday–Thursday · 10 questions per assessment</span></div>
+    <Empty title="0 of 800 Sponsored View assessments are available">The current backend has no Sponsored View assessment or attempt records (0 of the 8,000-question target). Payment and rewards are not enabled for this library yet.</Empty>
+  </Page>
 }

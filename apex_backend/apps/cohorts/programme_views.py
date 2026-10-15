@@ -19,28 +19,29 @@ from .models import (
 )
 from .tutorial_schedule import CAPABILITY_FIELDS
 from .views import _get_client_ip
+from .weekly_schedule import (
+    EAT,
+    activity_window,
+    attempt_deadline as weekly_attempt_deadline,
+    next_opening as weekly_next_opening,
+)
 
 
 def contest_window_for(value):
-    local_date = timezone.localtime(value).date()
+    local_date = value.astimezone(EAT).date()
     if local_date.weekday() not in (4, 5, 6):
         return None
 
     friday = local_date - timedelta(days=local_date.weekday() - 4)
-    start = timezone.make_aware(
-        datetime.combine(friday, time.min),
-        timezone.get_current_timezone(),
-    )
+    start = timezone.make_aware(datetime.combine(friday, time.min), EAT)
     return start, start + timedelta(days=3)
 
 
 def _assessment_is_ready(assessment):
     if assessment.duration_minutes != 20:
         return False
-    if not assessment.video or not assessment.video.storage.exists(assessment.video.name):
-        return False
     questions = list(assessment.questions.order_by('order'))
-    if len(questions) != 5 or [question.order for question in questions] != [1, 2, 3, 4, 5]:
+    if len(questions) != 10 or [question.order for question in questions] != list(range(1, 11)):
         return False
     return all(
         question.question_type == 'multiple_choice'
@@ -61,7 +62,6 @@ def _snapshot(assessment):
         'title': assessment.title,
         'field': assessment.field,
         'description': assessment.description,
-        'video_url': assessment.video.url,
         'questions': [
             {
                 'id': str(question.id),
@@ -70,17 +70,19 @@ def _snapshot(assessment):
                 'options': question.options,
                 'correct_answer': question.correct_answer,
                 'rationale': question.rationale,
+                'requires_reasoning': question.requires_reasoning,
             }
             for question in assessment.questions.order_by('order')
         ],
-        'scoring_rule': 'Each of five questions is worth 20 percentage points.',
+        'scoring_rule': 'Each of ten questions is worth 10 percentage points.',
     }
 
 
 def _attempt_response(attempt):
+    now = timezone.now()
     remaining = max(
         0,
-        int((attempt.deadline_at - timezone.now()).total_seconds()),
+        int((attempt.deadline_at - now).total_seconds()),
     ) if attempt.deadline_at else 0
     snapshot = attempt.assessment_snapshot
     questions = [
@@ -89,23 +91,33 @@ def _attempt_response(attempt):
             'order': question['order'],
             'prompt': question['prompt'],
             'options': question['options'],
+            'requires_reasoning': question.get('requires_reasoning', False),
         }
         for question in snapshot.get('questions', [])
     ]
+    answers = {}
+    reasoning = {}
+    for question_id, value in attempt.answers.items():
+        answers[question_id] = value.get('answer', '') if isinstance(value, dict) else value
+        if isinstance(value, dict) and value.get('reasoning'):
+            reasoning[question_id] = value['reasoning']
+    attempt_status = attempt.status
+    if attempt_status == 'in_progress' and attempt.deadline_at and now >= attempt.deadline_at:
+        attempt_status = 'timed_out'
     return {
         'id': str(attempt.id),
         'assessment': str(attempt.assessment_id),
         'title': snapshot.get('title', attempt.assessment.title),
         'field': snapshot.get('field', attempt.assessment.field),
         'description': snapshot.get('description', attempt.assessment.description),
-        'video_url': snapshot.get('video_url'),
         'questions': questions,
-        'answers': attempt.answers,
-        'status': attempt.status,
+        'answers': answers,
+        'reasoning': reasoning,
+        'status': attempt_status,
         'score': attempt.score,
         'started_at': attempt.started_at,
         'deadline_at': attempt.deadline_at,
-        'server_time': timezone.now(),
+        'server_time': now,
         'time_remaining': remaining,
         'is_flagged': attempt.is_flagged,
     }
@@ -396,42 +408,29 @@ class ContestAssessmentListView(APIView):
 
     def get(self, request):
         now = timezone.now()
-        local_now = timezone.localtime(now)
-        if local_now.weekday() not in (4, 5, 6):
-            return Response([])
-
-        entitlements = ParticipationPayment.objects.filter(
+        entitlements = set(ParticipationPayment.objects.filter(
             user=request.user,
             status='verified',
             expires_at__gt=now,
-        ).values_list('field', flat=True)
-        if not entitlements:
-            return Response([])
-
-        friday = local_now.date() - timedelta(days=local_now.weekday() - 4)
-        window_start = timezone.make_aware(
-            datetime.combine(friday, time.min),
-            timezone.get_current_timezone(),
-        )
-        window_end = window_start + timedelta(days=3)
+        ).values_list('field', flat=True))
+        attempts = {
+            attempt.assessment_id: attempt
+            for attempt in AssessmentScheduleAttempt.objects.filter(user=request.user)
+            .select_related('assessment')
+        }
+        window = activity_window('main_contest', now)
         assessments = AssessmentSchedule.objects.filter(
-            field__in=entitlements,
             status__in=('published', 'scheduled'),
-            scheduled_for__gte=window_start,
-            scheduled_for__lt=window_end,
         ).prefetch_related('questions').order_by('field', 'day', 'assessment_slot')
 
         results = []
         for assessment in assessments:
-            window = contest_window_for(assessment.scheduled_for)
-            if not window or not (window[0] <= now < window[1]):
-                continue
             if not _assessment_is_ready(assessment):
                 continue
-            attempt = AssessmentScheduleAttempt.objects.filter(
-                user=request.user,
-                assessment=assessment,
-            ).first()
+            attempt = attempts.get(assessment.id)
+            entitled = assessment.field in entitlements
+            if not entitled and attempt is None:
+                continue
             results.append({
                 'id': str(assessment.id),
                 'title': assessment.title,
@@ -440,12 +439,79 @@ class ContestAssessmentListView(APIView):
                 'day': assessment.day,
                 'assessment_slot': assessment.assessment_slot,
                 'scheduled_for': assessment.scheduled_for,
-                'video_url': assessment.video.url,
                 'duration_minutes': 20,
-                'window_closes_at': window[1],
+                'can_start': bool(entitled and window),
+                'window_closes_at': window[1] if window else None,
+                'next_opening_at': None if window else weekly_next_opening('main_contest', now),
                 'attempt': _attempt_response(attempt) if attempt else None,
             })
         return Response(results)
+
+
+class ContestLibraryView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        filters = {}
+        field = request.query_params.get('field')
+        if field:
+            if field not in CAPABILITY_FIELDS:
+                raise serializers.ValidationError({'field': 'Choose an official study area.'})
+            filters['field'] = field
+        week_value = request.query_params.get('week')
+        if week_value:
+            try:
+                library_week = int(week_value)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError({'week': 'Week must be between 1 and 8.'})
+            if not 1 <= library_week <= 8:
+                raise serializers.ValidationError({'week': 'Week must be between 1 and 8.'})
+            filters['month'] = (library_week - 1) // 4 + 1
+            filters['week'] = (library_week - 1) % 4 + 1
+
+        assessments = list(AssessmentSchedule.objects.filter(
+            status__in=('published', 'scheduled'),
+        ).filter(**filters).prefetch_related('questions').order_by(
+            'month', 'week', 'field', 'day', 'assessment_slot',
+        ))
+        now = timezone.now()
+        window = activity_window('main_contest', now)
+        entitlement_fields = set(ParticipationPayment.objects.filter(
+            user=request.user,
+            status='verified',
+            expires_at__gt=now,
+        ).values_list('field', flat=True))
+        attempts = {
+            attempt.assessment_id: attempt
+            for attempt in AssessmentScheduleAttempt.objects.filter(
+                user=request.user,
+                assessment__in=assessments,
+            ).select_related('assessment')
+        }
+        results = []
+        for assessment in assessments:
+            if not _assessment_is_ready(assessment):
+                continue
+            attempt = attempts.get(assessment.id)
+            entitled = assessment.field in entitlement_fields
+            results.append({
+                'id': str(assessment.id),
+                'title': assessment.title,
+                'field': assessment.field,
+                'week': (assessment.month - 1) * 4 + assessment.week,
+                'description': assessment.description,
+                'day': assessment.day,
+                'assessment_slot': assessment.assessment_slot,
+                'scheduled_for': assessment.scheduled_for,
+                'question_count': 10,
+                'duration_minutes': 20,
+                'access_price_kes': 100,
+                'can_start': entitled and window is not None,
+                'window_closes_at': window[1] if window else None,
+                'next_opening_at': None if window else weekly_next_opening('main_contest', now),
+                'attempt': _attempt_response(attempt) if attempt else None,
+            })
+        return Response({'count': len(results), 'results': results})
 
 
 class StartContestAssessmentView(APIView):
@@ -459,10 +525,10 @@ class StartContestAssessmentView(APIView):
                 status__in=('published', 'scheduled'),
             )
             now = timezone.now()
-            window = contest_window_for(assessment.scheduled_for)
-            if not window or not (window[0] <= now < window[1]):
+            window = activity_window('main_contest', now)
+            if not window:
                 return Response(
-                    {'error': 'This assessment is only available during its published Friday-to-Sunday contest window.'},
+                    {'error': 'Main Contest assessments are available Friday through Sunday in EAT.'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
             if not ParticipationPayment.objects.filter(
@@ -477,7 +543,7 @@ class StartContestAssessmentView(APIView):
                 )
             if not _assessment_is_ready(assessment):
                 return Response(
-                    {'error': 'This assessment is not available because its video or question set is incomplete.'},
+                    {'error': 'This assessment is not available because its ten-question set is incomplete or invalid.'},
                     status=status.HTTP_409_CONFLICT,
                 )
 
@@ -485,6 +551,7 @@ class StartContestAssessmentView(APIView):
                 user=request.user,
                 assessment=assessment,
                 defaults={
+                    'started_at': now,
                     'question_order': [
                         str(question.id)
                         for question in assessment.questions.order_by('order')
@@ -496,10 +563,10 @@ class StartContestAssessmentView(APIView):
                 },
             )
             if created:
-                attempt.deadline_at = _attempt_deadline(
+                attempt.deadline_at = weekly_attempt_deadline(
+                    'main_contest',
                     attempt.started_at,
                     attempt.duration_seconds,
-                    window[1],
                 )
                 attempt.save(update_fields=('deadline_at',))
             elif attempt.status != 'in_progress':
@@ -523,6 +590,71 @@ class StartContestAssessmentView(APIView):
         return Response(_attempt_response(attempt), status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
+class SaveContestAttemptAnswersView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, attempt_id):
+        with transaction.atomic():
+            attempt = get_object_or_404(
+                AssessmentScheduleAttempt.objects.select_for_update(),
+                id=attempt_id,
+                user=request.user,
+            )
+            if attempt.status != 'in_progress':
+                return Response(
+                    {'error': 'This assessment attempt is no longer active.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            now = timezone.now()
+            if not attempt.deadline_at or now >= attempt.deadline_at:
+                attempt.status = 'timed_out'
+                attempt.submitted_at = now
+                attempt.save(update_fields=('status', 'submitted_at'))
+                return Response(
+                    {'error': 'The assessment deadline has expired.'},
+                    status=status.HTTP_410_GONE,
+                )
+            answers = request.data.get('answers', {})
+            reasoning = request.data.get('reasoning', {})
+            if not isinstance(answers, dict) or not isinstance(reasoning, dict):
+                return Response(
+                    {'error': 'Answers and reasoning must be question-to-value maps.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            questions = {
+                question['id']: question
+                for question in attempt.assessment_snapshot.get('questions', [])
+            }
+            normalized = dict(attempt.answers)
+            for raw_id, answer in answers.items():
+                question_id = str(raw_id)
+                if question_id not in questions or answer not in questions[question_id]['options']:
+                    return Response(
+                        {'error': 'One or more answers are invalid for this assessment version.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                old_value = normalized.get(question_id, {})
+                normalized[question_id] = {
+                    'answer': answer,
+                    'reasoning': old_value.get('reasoning', '') if isinstance(old_value, dict) else '',
+                }
+            for raw_id, text in reasoning.items():
+                question_id = str(raw_id)
+                if question_id not in questions or not isinstance(text, str) or len(text) > 5000:
+                    return Response(
+                        {'error': 'One or more written reasoning responses are invalid.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                old_value = normalized.get(question_id, {})
+                normalized[question_id] = {
+                    'answer': old_value.get('answer', '') if isinstance(old_value, dict) else old_value,
+                    'reasoning': text,
+                }
+            attempt.answers = normalized
+            attempt.save(update_fields=('answers',))
+        return Response(_attempt_response(attempt))
+
+
 class SubmitContestAssessmentView(APIView):
     permission_classes = (IsAuthenticated,)
 
@@ -534,6 +666,9 @@ class SubmitContestAssessmentView(APIView):
                 user=request.user,
             )
             if attempt.status == 'graded':
+                from .support_views import sync_support_eligibilities_for_user
+                sync_support_eligibilities_for_user(attempt.user)
+
                 return Response({
                     'attempt_id': str(attempt.id),
                     'status': attempt.status,
@@ -564,18 +699,50 @@ class SubmitContestAssessmentView(APIView):
                 )
             question_snapshot = attempt.assessment_snapshot.get('questions', [])
             questions = {question['id']: question for question in question_snapshot}
+            normalized_answers = {str(question_id): answer for question_id, answer in answers.items()}
             if any(
-                str(question_id) not in questions
-                or answer not in questions[str(question_id)]['options']
-                for question_id, answer in answers.items()
+                question_id not in questions
+                or answer not in questions[question_id]['options']
+                for question_id, answer in normalized_answers.items()
             ):
                 return Response(
                     {'error': 'One or more answers are not valid for this assessment version.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            normalized_answers = {str(question_id): answer for question_id, answer in answers.items()}
-            attempt.answers = normalized_answers
+            reasoning = request.data.get('reasoning', {})
+            if not isinstance(reasoning, dict):
+                return Response(
+                    {'error': 'Written reasoning must be submitted as a question-to-text map.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            normalized_reasoning = {}
+            for question_id, text in reasoning.items():
+                question_id = str(question_id)
+                if question_id not in questions or not isinstance(text, str) or len(text) > 5000:
+                    return Response(
+                        {'error': 'One or more written reasoning responses are invalid.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if text.strip():
+                    normalized_reasoning[question_id] = text.strip()
+            if any(
+                question.get('requires_reasoning')
+                and not normalized_reasoning.get(question['id'])
+                for question in question_snapshot
+            ):
+                return Response(
+                    {'error': 'Written reasoning is required for one or more questions.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            attempt.answers = {
+                question_id: {
+                    'answer': answer,
+                    'reasoning': normalized_reasoning.get(question_id, ''),
+                }
+                for question_id, answer in normalized_answers.items()
+            }
             attempt.submitted_at = now
             attempt.status = 'graded'
             attempt.ip_address = _get_client_ip(request)

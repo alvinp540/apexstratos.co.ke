@@ -3,7 +3,6 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -17,6 +16,7 @@ from apps.cohorts.models import (
     ParticipationPayment,
     ParticipationPaymentEvent,
 )
+
 from apps.cohorts.programme_views import _attempt_deadline, contest_window_for
 
 
@@ -84,26 +84,25 @@ class MainContestAccessTests(APITestCase):
             'payment_reference': reference,
         }
 
-    def make_published_assessment(self, field='Software Development'):
+    def make_published_assessment(self, field='Software Development', month=1, week=1):
         friday = timezone.make_aware(
             datetime(2026, 10, 16, 9, 0),
             ZoneInfo('Africa/Nairobi'),
         )
         assessment = AssessmentSchedule.objects.create(
-            month=1,
-            week=1,
+            month=month,
+            week=week,
             day=4,
             assessment_slot=1,
             field=field,
             title='API scenario',
             description='Apply API design principles to a practical case.',
             learning_objectives=['Interpret', 'Reason', 'Apply'],
-            video=SimpleUploadedFile('scenario.mp4', b'video-bytes', content_type='video/mp4'),
             duration_minutes=20,
             status='published',
             scheduled_for=friday,
         )
-        for order in range(1, 6):
+        for order in range(1, 11):
             AssessmentScheduleQuestion.objects.create(
                 assessment=assessment,
                 order=order,
@@ -131,6 +130,29 @@ class MainContestAccessTests(APITestCase):
                 ZoneInfo('Africa/Nairobi'),
             ),
         )
+
+    def test_library_lists_valid_assessments_for_all_eight_weeks_without_answer_keys(self):
+        self.make_published_assessment(month=2, week=1)
+
+        response = self.client.get(reverse('contest-assessment-library'), {'week': 5})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        assessment = response.data['results'][0]
+        self.assertEqual(assessment['week'], 5)
+        self.assertEqual(assessment['question_count'], 10)
+        self.assertEqual(assessment['access_price_kes'], 100)
+        self.assertNotIn('video_url', assessment)
+        self.assertNotIn('correct_answer', assessment)
+
+    def test_library_excludes_assessments_without_ten_valid_questions(self):
+        assessment = self.make_published_assessment()
+        AssessmentScheduleQuestion.objects.filter(assessment=assessment, order=10).delete()
+
+        response = self.client.get(reverse('contest-assessment-library'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 0)
 
     def test_payment_request_is_pending_and_does_not_grant_access(self):
         response = self.client.post(
@@ -365,3 +387,41 @@ class MainContestAccessTests(APITestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.data['score'], first.data['score'])
         self.assertEqual(AssessmentScheduleAttempt.objects.count(), 1)
+
+    def test_contest_requires_written_reasoning_when_configured(self):
+        self.grant_main_contest_access()
+        assessment = self.make_published_assessment()
+        question = assessment.questions.get(order=1)
+        question.requires_reasoning = True
+        question.save(update_fields=['requires_reasoning'])
+        sunday = timezone.make_aware(
+            datetime(2026, 10, 18, 20, 0),
+            ZoneInfo('Africa/Nairobi'),
+        )
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=sunday):
+            started = self.client.post(
+                reverse('contest-assessment-start', kwargs={'assessment_id': assessment.id}),
+                {},
+                format='json',
+            )
+        answers = {item['id']: 'A' for item in started.data['questions']}
+        submit_url = reverse('contest-assessment-submit', kwargs={'attempt_id': started.data['id']})
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=sunday + timedelta(minutes=1)):
+            missing_reasoning = self.client.post(
+                submit_url,
+                {'answers': answers},
+                format='json',
+            )
+            submitted = self.client.post(
+                submit_url,
+                {'answers': answers, 'reasoning': {str(question.id): 'The evidence supports this choice.'}},
+                format='json',
+            )
+
+        self.assertEqual(missing_reasoning.status_code, 400)
+        self.assertEqual(submitted.status_code, 200)
+        attempt = AssessmentScheduleAttempt.objects.get()
+        self.assertEqual(
+            attempt.answers[str(question.id)]['reasoning'],
+            'The evidence supports this choice.',
+        )

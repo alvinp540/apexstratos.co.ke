@@ -4,12 +4,20 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db import transaction
-from django.db.models import Q
+from django.db import IntegrityError, transaction
+from django.db.models import Count, Prefetch, Q
 from datetime import timedelta
 import random
 
-from .models import Cohort, Assessment, AssessmentAttempt, CohortEnrollment, Tutorial
+from .models import (
+    Cohort,
+    Assessment,
+    AssessmentAttempt,
+    CohortEnrollment,
+    Tutorial,
+    TutorialAttempt,
+    TutorialProgress,
+)
 from .serializers import (
     CohortSerializer, AssessmentSerializer, AssessmentAttemptSerializer, HeartbeatSerializer,
     PSPRegistrationCreateSerializer,
@@ -21,6 +29,7 @@ from .anti_cheat import flag_attempt
 from apps.trust_engine.engine import recalculate_trust_score
 from apps.accounts.permissions import IsAdmin
 from .allocation import allocate_cohort_rewards
+from .weekly_schedule import activity_window, attempt_deadline, weekly_schedule
 from utils.pagination import StandardResultsPagination
 
 
@@ -30,14 +39,31 @@ class TutorialListView(APIView):
     def get(self, request):
         filters = TutorialQuerySerializer(data=request.query_params)
         filters.is_valid(raise_exception=True)
+        query = dict(filters.validated_data)
+        library_week = query.pop('week', None)
         tutorials = Tutorial.objects.filter(
             status__in=('published', 'scheduled'),
-            scheduled_for__lte=timezone.now(),
-        ).prefetch_related('questions').order_by('scheduled_for', 'field', 'daily_slot')
-        tutorials = tutorials.filter(**filters.validated_data)
+        ).annotate(question_count=Count('questions')).filter(
+            question_count=10,
+        ).prefetch_related(
+            'questions',
+            Prefetch(
+                'progress',
+                queryset=TutorialProgress.objects.filter(user=request.user),
+                to_attr='current_user_progress',
+            ),
+        ).order_by('month', 'week', 'day', 'field', 'daily_slot')
+        if library_week is not None:
+            query['month'] = (library_week - 1) // 4 + 1
+            query['week'] = (library_week - 1) % 4 + 1
+        tutorials = tutorials.filter(**query)
         paginator = StandardResultsPagination()
         page = paginator.paginate_queryset(tutorials, request)
-        return paginator.get_paginated_response(TutorialSerializer(page, many=True).data)
+        return paginator.get_paginated_response(TutorialSerializer(
+            page,
+            many=True,
+            context={'request': request, 'include_attempt': False},
+        ).data)
 
 
 class TutorialDetailView(APIView):
@@ -45,12 +71,335 @@ class TutorialDetailView(APIView):
 
     def get(self, request, tutorial_id):
         tutorial = get_object_or_404(
-            Tutorial.objects.prefetch_related('questions'),
+            Tutorial.objects.prefetch_related(
+                'questions',
+                Prefetch(
+                    'progress',
+                    queryset=TutorialProgress.objects.filter(user=request.user),
+                    to_attr='current_user_progress',
+                ),
+                Prefetch(
+                    'attempts',
+                    queryset=TutorialAttempt.objects.filter(user=request.user).order_by('-started_at'),
+                    to_attr='current_user_attempts',
+                ),
+            ),
             id=tutorial_id,
             status__in=('published', 'scheduled'),
-            scheduled_for__lte=timezone.now(),
         )
         return Response(TutorialSerializer(tutorial).data)
+
+
+def _tutorial_is_ready(tutorial):
+    questions = list(tutorial.questions.order_by('order'))
+    if [question.order for question in questions] != list(range(1, 11)):
+        return False
+    return all(
+        question.question_type == 'multiple_choice'
+        and isinstance(question.options, list)
+        and len(question.options) >= 2
+        and question.correct_answer in question.options
+        for question in questions
+    )
+
+
+def _tutorial_attempt_response(attempt, *, reveal_answers=False):
+    questions = attempt.question_snapshot
+    public_questions = []
+    answers = {}
+    reasoning = {}
+    for question_id, value in attempt.answers.items():
+        answers[question_id] = value.get('answer', '') if isinstance(value, dict) else value
+        if isinstance(value, dict) and value.get('reasoning'):
+            reasoning[question_id] = value['reasoning']
+    for question in questions:
+        item = {
+            'id': question['id'],
+            'order': question['order'],
+            'prompt': question['prompt'],
+            'options': question['options'],
+            'requires_reasoning': question.get('requires_reasoning', False),
+        }
+        if reveal_answers and attempt.status == 'graded':
+            item['correct_answer'] = question['correct_answer']
+            item['rationale'] = question['rationale']
+            item['selected_answer'] = answers.get(question['id'])
+            item['written_reasoning'] = reasoning.get(question['id'], '')
+        public_questions.append(item)
+    now = timezone.now()
+    try:
+        deadline = attempt_deadline('tutorials', attempt.started_at)
+    except ValueError:
+        deadline = None
+    return {
+        'id': str(attempt.id),
+        'tutorial': str(attempt.tutorial_id),
+        'title': attempt.tutorial.title,
+        'questions': public_questions,
+        'answers': answers,
+        'reasoning': reasoning,
+        'score': attempt.score,
+        'status': attempt.status,
+        'started_at': attempt.started_at,
+        'deadline_at': deadline,
+        'server_time': now,
+        'time_remaining': max(0, int((deadline - now).total_seconds())) if deadline else 0,
+        'submitted_at': attempt.submitted_at,
+    }
+
+
+class StartTutorialAttemptView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, tutorial_id):
+        with transaction.atomic():
+            tutorial = get_object_or_404(
+                Tutorial.objects.select_for_update().prefetch_related('questions'),
+                id=tutorial_id,
+                status__in=('published', 'scheduled'),
+            )
+            now = timezone.now()
+            window = activity_window('tutorials', now)
+            if window is None:
+                return Response(
+                    {'error': 'Tutorial assessments are available Monday through Thursday in EAT.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            attempt = TutorialAttempt.objects.filter(
+                user=request.user,
+                tutorial=tutorial,
+            ).order_by('-started_at').first()
+            if attempt is not None:
+                if attempt.status == 'graded':
+                    return Response(
+                        _tutorial_attempt_response(attempt, reveal_answers=True),
+                        status=status.HTTP_200_OK,
+                    )
+                if attempt.status != 'in_progress':
+                    return Response(
+                        {'error': 'This tutorial attempt is no longer active.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                deadline = attempt_deadline('tutorials', attempt.started_at)
+                if now >= deadline:
+                    attempt.status = 'timed_out'
+                    attempt.submitted_at = now
+                    attempt.save(update_fields=('status', 'submitted_at'))
+                    return Response(
+                        {'error': 'The tutorial deadline has expired.'},
+                        status=status.HTTP_410_GONE,
+                    )
+                return Response(_tutorial_attempt_response(attempt), status=status.HTTP_200_OK)
+
+            if not _tutorial_is_ready(tutorial):
+                return Response(
+                    {'error': 'This tutorial requires ten valid multiple-choice questions.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            questions = list(tutorial.questions.order_by('order'))
+            snapshot = [
+                {
+                    'id': str(question.id),
+                    'order': question.order,
+                    'prompt': question.prompt,
+                    'options': question.options,
+                    'correct_answer': question.correct_answer,
+                    'rationale': question.rationale,
+                    'requires_reasoning': question.requires_reasoning,
+                }
+                for question in questions
+            ]
+            try:
+                with transaction.atomic():
+                    attempt = TutorialAttempt.objects.create(
+                        user=request.user,
+                        tutorial=tutorial,
+                        question_snapshot=snapshot,
+                        started_at=now,
+                    )
+            except IntegrityError:
+                attempt = TutorialAttempt.objects.get(
+                    user=request.user,
+                    tutorial=tutorial,
+                    status='in_progress',
+                )
+                return Response(_tutorial_attempt_response(attempt), status=status.HTTP_200_OK)
+        return Response(
+            _tutorial_attempt_response(attempt),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SaveTutorialAttemptView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, attempt_id):
+        with transaction.atomic():
+            attempt = get_object_or_404(
+                TutorialAttempt.objects.select_for_update().select_related('tutorial'),
+                id=attempt_id,
+                user=request.user,
+            )
+            if attempt.status != 'in_progress':
+                return Response(
+                    {'error': 'This tutorial attempt is no longer active.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            now = timezone.now()
+            if now >= attempt_deadline('tutorials', attempt.started_at):
+                attempt.status = 'timed_out'
+                attempt.submitted_at = now
+                attempt.save(update_fields=('status', 'submitted_at'))
+                return Response(
+                    {'error': 'The tutorial deadline has expired.'},
+                    status=status.HTTP_410_GONE,
+                )
+
+            answers = request.data.get('answers', {})
+            reasoning = request.data.get('reasoning', {})
+            if not isinstance(answers, dict) or not isinstance(reasoning, dict):
+                return Response(
+                    {'error': 'Answers and reasoning must be question-to-value maps.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            questions = {item['id']: item for item in attempt.question_snapshot}
+            normalized = dict(attempt.answers)
+            for raw_id, answer in answers.items():
+                question_id = str(raw_id)
+                if question_id not in questions or answer not in questions[question_id]['options']:
+                    return Response(
+                        {'error': 'One or more answers are invalid for this tutorial version.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                old_value = normalized.get(question_id, {})
+                normalized[question_id] = {
+                    'answer': answer,
+                    'reasoning': old_value.get('reasoning', '') if isinstance(old_value, dict) else '',
+                }
+            for raw_id, text in reasoning.items():
+                question_id = str(raw_id)
+                if question_id not in questions or not isinstance(text, str) or len(text) > 5000:
+                    return Response(
+                        {'error': 'One or more written reasoning responses are invalid.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                old_value = normalized.get(question_id, {})
+                normalized[question_id] = {
+                    'answer': old_value.get('answer', '') if isinstance(old_value, dict) else old_value,
+                    'reasoning': text,
+                }
+            attempt.answers = normalized
+            attempt.save(update_fields=('answers',))
+        return Response(_tutorial_attempt_response(attempt))
+
+
+class SubmitTutorialAttemptView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, attempt_id):
+        with transaction.atomic():
+            attempt = get_object_or_404(
+                TutorialAttempt.objects.select_for_update().select_related('tutorial'),
+                id=attempt_id,
+                user=request.user,
+            )
+            if attempt.status == 'graded':
+                return Response(_tutorial_attempt_response(attempt, reveal_answers=True))
+            if attempt.status != 'in_progress':
+                return Response(
+                    {'error': 'This tutorial attempt is no longer active.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            now = timezone.now()
+            deadline = attempt_deadline('tutorials', attempt.started_at)
+            if now >= deadline:
+                attempt.status = 'timed_out'
+                attempt.submitted_at = now
+                attempt.save(update_fields=('status', 'submitted_at'))
+                return Response(
+                    {'error': 'The tutorial deadline has expired.'},
+                    status=status.HTTP_410_GONE,
+                )
+            answers = request.data.get('answers')
+            question_map = {item['id']: item for item in attempt.question_snapshot}
+            if not isinstance(answers, dict) or set(map(str, answers)) != set(question_map):
+                return Response(
+                    {'error': 'Submit one answer for each of the ten questions.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            normalized = {str(key): value for key, value in answers.items()}
+            if any(
+                answer not in question_map[question_id]['options']
+                for question_id, answer in normalized.items()
+            ):
+                return Response(
+                    {'error': 'One or more answers are invalid for this tutorial version.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            reasoning = request.data.get('reasoning', {})
+            if not isinstance(reasoning, dict):
+                return Response(
+                    {'error': 'Written reasoning must be submitted as a question-to-text map.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            normalized_reasoning = {}
+            for question_id, text in reasoning.items():
+                question_id = str(question_id)
+                if question_id not in question_map or not isinstance(text, str) or len(text) > 5000:
+                    return Response(
+                        {'error': 'One or more written reasoning responses are invalid.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if text.strip():
+                    normalized_reasoning[question_id] = text.strip()
+            if any(
+                question.get('requires_reasoning')
+                and not normalized_reasoning.get(question['id'])
+                for question in attempt.question_snapshot
+            ):
+                return Response(
+                    {'error': 'Written reasoning is required for one or more questions.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            score = round(
+                100 * sum(
+                    normalized[question['id']] == question['correct_answer']
+                    for question in attempt.question_snapshot
+                ) / 10,
+                2,
+            )
+            attempt.answers = {
+                question_id: {
+                    'answer': answer,
+                    'reasoning': normalized_reasoning.get(question_id, ''),
+                }
+                for question_id, answer in normalized.items()
+            }
+            attempt.score = score
+            attempt.status = 'graded'
+            attempt.submitted_at = now
+            attempt.save(update_fields=('answers', 'score', 'status', 'submitted_at'))
+
+            progress, _ = TutorialProgress.objects.select_for_update().get_or_create(
+                user=request.user,
+                tutorial=attempt.tutorial,
+            )
+            progress.attempt_count += 1
+            progress.best_score = max(progress.best_score, score)
+            progress.completed_at = progress.completed_at or now
+            progress.last_attempt = attempt
+            progress.save(update_fields=(
+                'attempt_count', 'best_score', 'completed_at', 'last_attempt', 'updated_at',
+            ))
+        return Response(_tutorial_attempt_response(attempt, reveal_answers=True))
+
+
+class WeeklyScheduleView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        return Response(weekly_schedule())
 
 
 class CohortListView(APIView):
@@ -148,13 +497,24 @@ class CohortEnrollView(APIView):
 
 class CohortAssessmentsView(APIView):
     def get(self, request, cohort_id):
-        assessments = Assessment.objects.filter(cohort_id=cohort_id, is_active=True)
+        assessments = Assessment.objects.filter(
+            cohort_id=cohort_id,
+            is_active=True,
+        ).annotate(
+            question_count=Count('questions'),
+            mcq_count=Count('questions', filter=Q(questions__question_type='mcq')),
+        ).filter(question_count=10, mcq_count=10)
         return Response(AssessmentSerializer(assessments, many=True).data)
 
 
 class StartAssessmentView(APIView):
     def post(self, request, assessment_id):
         assessment = get_object_or_404(Assessment, id=assessment_id, is_active=True)
+        if assessment.questions.count() != 10 or assessment.questions.exclude(question_type='mcq').exists():
+            return Response(
+                {'error': 'This assessment is unavailable until it has exactly ten multiple-choice questions.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         cohort = assessment.cohort
         if not PSPRegistration.objects.filter(
             user=request.user,
@@ -309,12 +669,7 @@ class HeartbeatView(APIView):
             attempt.tab_switches += 1
         if serializer.validated_data['time_anomaly']:
             attempt.time_anomalies += 1
-        watched_seconds = serializer.validated_data.get('video_watched_seconds')
-        if watched_seconds is not None:
-            attempt.video_watched_seconds = max(attempt.video_watched_seconds, watched_seconds)
-        if serializer.validated_data.get('video_completed'):
-            attempt.video_completed = True
-        attempt.save(update_fields=['tab_switches', 'time_anomalies', 'video_watched_seconds', 'video_completed'])
+        attempt.save(update_fields=['tab_switches', 'time_anomalies'])
         return Response({'status': 'ok'})
 class PSPRegistrationListView(APIView):
     permission_classes = [IsAuthenticated]

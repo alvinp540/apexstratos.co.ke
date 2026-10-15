@@ -1,8 +1,9 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import (
     Cohort, Assessment, Question, AssessmentAttempt, CohortEnrollment,
     PSPRegistration, PSPVerification, WhatsAppInviteRequest, CohortCoachAssignment,
-    Tutorial, TutorialQuestion,
+    Tutorial, TutorialQuestion, TutorialProgress,
     AssessmentSchedule, AssessmentScheduleQuestion, ParticipationPayment, AssessmentScheduleAttempt
 )
 
@@ -16,13 +17,16 @@ class QuestionSerializer(serializers.ModelSerializer):
 class TutorialQuestionPublicSerializer(serializers.ModelSerializer):
     class Meta:
         model = TutorialQuestion
-        fields = ('id', 'order', 'question_type', 'prompt', 'options')
+        fields = ('id', 'order', 'question_type', 'prompt', 'options', 'requires_reasoning')
         read_only_fields = fields
 
 
 class TutorialSerializer(serializers.ModelSerializer):
     questions = TutorialQuestionPublicSerializer(many=True, read_only=True)
-    video_url = serializers.SerializerMethodField()
+    week = serializers.SerializerMethodField()
+    progress = serializers.SerializerMethodField()
+    can_start = serializers.SerializerMethodField()
+    current_attempt = serializers.SerializerMethodField()
 
     class Meta:
         model = Tutorial
@@ -32,18 +36,102 @@ class TutorialSerializer(serializers.ModelSerializer):
             'terminology_and_components', 'why_it_matters', 'how_it_works',
             'worked_examples', 'common_mistakes', 'practical_application',
             'decisions_and_tradeoffs', 'related_concepts',
-            'difficulty', 'video_url', 'duration_minutes',
-            'related_assessment_ids', 'scheduled_for', 'questions',
+            'difficulty', 'duration_minutes',
+            'related_assessment_ids', 'scheduled_for', 'questions', 'progress',
+            'can_start', 'current_attempt',
         )
         read_only_fields = fields
 
-    def get_video_url(self, obj):
-        return obj.video.url if obj.video else None
+    def get_week(self, obj):
+        return (obj.month - 1) * 4 + obj.week
+
+    def get_progress(self, obj):
+        progress = getattr(obj, 'current_user_progress', None)
+        if progress is None:
+            request = self.context.get('request')
+            if not request or not request.user.is_authenticated:
+                return None
+            progress = TutorialProgress.objects.filter(user=request.user, tutorial=obj).first()
+        else:
+            progress = progress[0] if progress else None
+        if not progress:
+            return {'completed': False, 'best_score': None, 'attempt_count': 0, 'completed_at': None}
+        return {
+            'completed': bool(progress.completed_at),
+            'best_score': progress.best_score,
+            'attempt_count': progress.attempt_count,
+            'completed_at': progress.completed_at,
+        }
+
+    def get_can_start(self, obj):
+        from .weekly_schedule import activity_window
+        return activity_window('tutorials') is not None
+
+    def get_current_attempt(self, obj):
+        if self.context.get('include_attempt') is False:
+            return None
+        attempts = getattr(obj, 'current_user_attempts', None)
+        if attempts is None:
+            request = self.context.get('request')
+            if not request or not request.user.is_authenticated:
+                return None
+            attempts = list(obj.attempts.filter(user=request.user).order_by('-started_at')[:1])
+        attempt = attempts[0] if attempts else None
+        if not attempt:
+            return None
+
+        answers = {}
+        reasoning = {}
+        for question_id, value in attempt.answers.items():
+            answers[question_id] = value.get('answer', '') if isinstance(value, dict) else value
+            if isinstance(value, dict) and value.get('reasoning'):
+                reasoning[question_id] = value['reasoning']
+        questions = []
+        for question in attempt.question_snapshot:
+            item = {
+                'id': question['id'],
+                'order': question['order'],
+                'prompt': question['prompt'],
+                'options': question['options'],
+                'requires_reasoning': question.get('requires_reasoning', False),
+            }
+            if attempt.status == 'graded':
+                item.update({
+                    'correct_answer': question['correct_answer'],
+                    'rationale': question.get('rationale', ''),
+                    'selected_answer': answers.get(question['id']),
+                    'written_reasoning': reasoning.get(question['id'], ''),
+                })
+            questions.append(item)
+
+        from .weekly_schedule import attempt_deadline
+        try:
+            deadline = attempt_deadline('tutorials', attempt.started_at)
+        except ValueError:
+            deadline = None
+        now = timezone.now()
+        attempt_status = attempt.status
+        if deadline and now >= deadline and attempt.status == 'in_progress':
+            attempt_status = 'timed_out'
+        return {
+            'id': str(attempt.id),
+            'tutorial': str(attempt.tutorial_id),
+            'title': attempt.tutorial.title,
+            'questions': questions,
+            'answers': answers,
+            'reasoning': reasoning,
+            'score': attempt.score,
+            'status': attempt_status,
+            'started_at': attempt.started_at,
+            'submitted_at': attempt.submitted_at,
+            'deadline_at': deadline,
+            'server_time': now,
+        }
 
 
 class TutorialQuerySerializer(serializers.Serializer):
     month = serializers.IntegerField(required=False, min_value=1)
-    week = serializers.IntegerField(required=False, min_value=1, max_value=4)
+    week = serializers.IntegerField(required=False, min_value=1, max_value=8)
     day = serializers.IntegerField(required=False, min_value=0, max_value=3)
     field = serializers.ChoiceField(required=False, choices=Tutorial.FIELD_CHOICES)
 
@@ -54,7 +142,7 @@ class AssessmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Assessment
         fields = (
-            'id', 'title', 'instructions', 'video_url', 'time_limit_minutes',
+            'id', 'title', 'instructions', 'time_limit_minutes',
             'difficulty', 'passing_score', 'is_active', 'questions',
         )
 
@@ -90,7 +178,7 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
         model = AssessmentAttempt
         fields = (
             'id', 'assessment', 'cohort', 'score', 'status', 'question_order',
-            'video_watched_seconds', 'video_completed', 'started_at', 'submitted_at', 'is_flagged',
+            'started_at', 'submitted_at', 'is_flagged',
         )
         read_only_fields = fields
 
@@ -98,8 +186,6 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
 class HeartbeatSerializer(serializers.Serializer):
     tab_switch = serializers.BooleanField(default=False)
     time_anomaly = serializers.BooleanField(default=False)
-    video_watched_seconds = serializers.IntegerField(required=False, min_value=0)
-    video_completed = serializers.BooleanField(default=False)
 
 
 class PSPVerificationSerializer(serializers.ModelSerializer):
@@ -211,21 +297,21 @@ class AssessmentScheduleQuestionPublicSerializer(serializers.ModelSerializer):
 
 class AssessmentScheduleSerializer(serializers.ModelSerializer):
     questions = AssessmentScheduleQuestionPublicSerializer(many=True, read_only=True)
-    video_url = serializers.SerializerMethodField()
+    week = serializers.SerializerMethodField()
     time_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = AssessmentSchedule
         fields = (
             'id', 'month', 'week', 'day', 'assessment_slot', 'field', 'title',
-            'description', 'learning_objectives', 'difficulty', 'video_url',
+            'description', 'learning_objectives', 'difficulty',
             'duration_minutes', 'passing_score', 'scheduled_for', 'questions',
             'time_remaining',
         )
         read_only_fields = fields
 
-    def get_video_url(self, obj):
-        return obj.video.url if obj.video else None
+    def get_week(self, obj):
+        return (obj.month - 1) * 4 + obj.week
 
     def get_time_remaining(self, obj):
         return obj.duration_minutes * 60
@@ -240,8 +326,8 @@ class AssessmentScheduleAttemptSerializer(serializers.ModelSerializer):
         model = AssessmentScheduleAttempt
         fields = (
             'id', 'user', 'assessment', 'assessment_title', 'status', 'score',
-            'video_watched_seconds', 'video_completed', 'started_at', 'submitted_at',
-            'duration_seconds', 'deadline_at', 'time_remaining', 'is_expired', 'is_flagged',
+            'started_at', 'submitted_at', 'duration_seconds', 'deadline_at',
+            'time_remaining', 'is_expired', 'is_flagged',
         )
         read_only_fields = (
             'id', 'user', 'assessment', 'status', 'score', 'started_at',

@@ -1,9 +1,8 @@
 from django.contrib import admin
 from django.contrib import messages
+from django import forms
 from django.core.exceptions import ValidationError
-from django.http import HttpResponseForbidden, HttpResponseRedirect
-from django.template.response import TemplateResponse
-from django.urls import path, reverse
+from django.db import transaction
 from django.utils import timezone
 from .models import (
 	Cohort,
@@ -23,23 +22,25 @@ from .models import (
 	ParticipationPayment,
 	ParticipationPaymentEvent,
 	AssessmentScheduleAttempt,
+	SupportProgram,
+	SupportEligibility,
+	SupportApplication,
+	SupportApplicationEvent,
 )
 from .allocation import allocate_cohort_rewards
-from .forms import DailyTutorialBundleForm
-from .tutorial_import import import_daily_tutorial_bundle
+from .support_views import reconcile_support_program
 
 
 class TutorialQuestionInline(admin.TabularInline):
 	model = TutorialQuestion
-	extra = 5
-	max_num = 5
-	fields = ('order', 'question_type', 'prompt', 'options', 'correct_answer', 'rationale')
+	extra = 10
+	max_num = 10
+	fields = ('order', 'question_type', 'prompt', 'options', 'correct_answer', 'rationale', 'requires_reasoning')
 	ordering = ('order',)
 
 
 @admin.register(Tutorial)
 class TutorialAdmin(admin.ModelAdmin):
-	change_list_template = 'admin/cohorts/tutorial/change_list.html'
 	list_display = ('title', 'field', 'month', 'week', 'day', 'daily_slot', 'status', 'scheduled_for')
 	list_filter = ('status', 'field', 'month', 'week', 'day', 'difficulty')
 	search_fields = ('title', 'description', 'field')
@@ -54,17 +55,11 @@ class TutorialAdmin(admin.ModelAdmin):
 			'terminology_and_components', 'why_it_matters', 'how_it_works',
 			'worked_examples', 'common_mistakes', 'practical_application',
 			'decisions_and_tradeoffs', 'related_concepts', 'difficulty',
-			'duration_minutes', 'video', 'related_assessment_ids',
+			'duration_minutes', 'related_assessment_ids',
 		)}),
 		('Review and publication', {'fields': ('status', 'expert_reviewed', 'review_notes', 'created_by', 'reviewed_by', 'published_at')}),
 		('Record', {'fields': ('created_at', 'updated_at')}),
 	)
-
-	def get_urls(self):
-		custom_urls = [
-			path('daily-upload/', self.admin_site.admin_view(self.daily_upload_view), name='cohorts_tutorial_daily_upload'),
-		]
-		return custom_urls + super().get_urls()
 
 	def has_module_permission(self, request):
 		return bool(request.user.is_authenticated and request.user.is_admin)
@@ -76,48 +71,21 @@ class TutorialAdmin(admin.ModelAdmin):
 		return self.has_module_permission(request)
 
 	def has_change_permission(self, request, obj=None):
-		return self.has_module_permission(request)
+		return self.has_module_permission(request) and not (
+			obj is not None and obj.attempts.exists()
+		)
 
 	def has_delete_permission(self, request, obj=None):
-		return self.has_module_permission(request)
-
-	def daily_upload_view(self, request):
-		if not request.user.is_admin:
-			return HttpResponseForbidden()
-		form = DailyTutorialBundleForm(request.POST or None, request.FILES or None)
-		if request.method == 'POST' and form.is_valid():
-			try:
-				tutorials = import_daily_tutorial_bundle(
-					uploaded_bundle=form.cleaned_data['bundle'],
-					month=form.cleaned_data['month'],
-					week=form.cleaned_data['week'],
-					day=int(form.cleaned_data['day']),
-					scheduled_for=form.cleaned_data['scheduled_for'],
-					created_by=request.user,
-				)
-			except ValidationError as error:
-				form.add_error('bundle', error)
-			else:
-				self.message_user(
-					request,
-					f'Imported {len(tutorials)} tutorials as Drafts. Review them before publishing.',
-					level=messages.SUCCESS,
-				)
-				return HttpResponseRedirect(reverse('admin:cohorts_tutorial_changelist'))
-
-		context = {
-			**self.admin_site.each_context(request),
-			'title': 'Upload tutorials for one day',
-			'opts': self.model._meta,
-			'form': form,
-			'upload_url': reverse('admin:cohorts_tutorial_daily_upload'),
-		}
-		return TemplateResponse(request, 'admin/cohorts/tutorial/daily_upload.html', context)
+		return self.has_module_permission(request) and not (
+			obj is not None and obj.attempts.exists()
+		)
 
 	def save_model(self, request, obj, form, change):
 		if change:
 			obj.status = Tutorial.STATUS_CHOICES[0][0]
 			obj.published_at = None
+		elif not obj.created_by_id:
+			obj.created_by = request.user
 			obj.reviewed_by = None
 		else:
 			obj.created_by = request.user
@@ -197,8 +165,6 @@ class TutorialAdmin(admin.ModelAdmin):
 
 	@staticmethod
 	def _validate_review(tutorial):
-		if not tutorial.video:
-			raise ValidationError('Upload an internal video before requesting review.')
 		teaching_sections = (
 			'concept_explanation', 'terminology_and_components', 'why_it_matters',
 			'how_it_works', 'worked_examples', 'common_mistakes',
@@ -208,9 +174,16 @@ class TutorialAdmin(admin.ModelAdmin):
 			raise ValidationError('Complete all structured teaching sections before requesting review.')
 		if not isinstance(tutorial.learning_objectives, list) or len(tutorial.learning_objectives) < 3:
 			raise ValidationError('At least three learning objectives are required.')
-		question_orders = list(tutorial.questions.order_by('order').values_list('order', flat=True))
-		if question_orders != [1, 2, 3, 4, 5]:
-			raise ValidationError('Exactly five tutorial questions numbered 1 through 5 are required.')
+		questions = list(tutorial.questions.order_by('order'))
+		if [question.order for question in questions] != list(range(1, 11)):
+			raise ValidationError('Exactly ten tutorial questions numbered 1 through 10 are required.')
+		for question in questions:
+			try:
+				question.full_clean()
+			except ValidationError as error:
+				raise ValidationError(f'Question {question.order}: {error.messages}')
+			if question.question_type != 'multiple_choice':
+				raise ValidationError(f'Question {question.order} must be multiple choice.')
 
 	@staticmethod
 	def _validate_approval(tutorial):
@@ -250,6 +223,7 @@ class AssessmentAdmin(admin.ModelAdmin):
 	list_display = ('title', 'cohort', 'difficulty', 'time_limit_minutes', 'is_active')
 	list_filter = ('is_active', 'difficulty', 'cohort')
 	search_fields = ('title', 'cohort__title')
+	exclude = ('video_url',)
 admin.site.register(Question)
 admin.site.register(AssessmentAttempt)
 admin.site.register(CohortEnrollment)
@@ -365,9 +339,9 @@ def sync_psp_registration(registration):
 
 class AssessmentScheduleQuestionInline(admin.TabularInline):
 	model = AssessmentScheduleQuestion
-	extra = 5
-	max_num = 5
-	fields = ('order', 'question_type', 'prompt', 'options', 'correct_answer', 'rationale')
+	extra = 10
+	max_num = 10
+	fields = ('order', 'question_type', 'prompt', 'options', 'correct_answer', 'rationale', 'requires_reasoning')
 	ordering = ('order',)
 
 
@@ -384,7 +358,7 @@ class AssessmentScheduleAdmin(admin.ModelAdmin):
 		('Schedule', {'fields': ('month', 'week', 'day', 'assessment_slot', 'field', 'scheduled_for')}),
 		('Content', {'fields': (
 			'title', 'description', 'learning_objectives', 'difficulty',
-			'duration_minutes', 'video', 'passing_score',
+			'duration_minutes', 'passing_score',
 		)}),
 		('Review and publication', {'fields': ('status', 'expert_reviewed', 'review_notes', 'created_by', 'reviewed_by', 'published_at')}),
 		('Record', {'fields': ('created_at', 'updated_at')}),
@@ -397,7 +371,7 @@ class AssessmentScheduleAdmin(admin.ModelAdmin):
 		return self.has_module_permission(request)
 
 	def has_add_permission(self, request):
-		return False
+		return self.has_module_permission(request)
 
 	def has_change_permission(self, request, obj=None):
 		return self.has_module_permission(request) and not (
@@ -408,6 +382,11 @@ class AssessmentScheduleAdmin(admin.ModelAdmin):
 		return self.has_module_permission(request) and not (
 			obj is not None and obj.attempts.exists()
 		)
+
+	def save_model(self, request, obj, form, change):
+		if not change and not obj.created_by_id:
+			obj.created_by = request.user
+		super().save_model(request, obj, form, change)
 
 	@admin.action(description='Submit selected assessments for review')
 	def submit_for_review(self, request, queryset):
@@ -480,20 +459,20 @@ class AssessmentScheduleAdmin(admin.ModelAdmin):
 
 	@staticmethod
 	def _validate_review(assessment):
-		if not assessment.video or not assessment.video.storage.exists(assessment.video.name):
-			raise ValidationError('Upload an available internal assessment video before review.')
 		if assessment.duration_minutes != 20:
 			raise ValidationError('Main contest assessments must use a 20-minute timer.')
 		if not isinstance(assessment.learning_objectives, list) or len(assessment.learning_objectives) < 3:
 			raise ValidationError('At least three learning objectives are required.')
 		questions = list(assessment.questions.order_by('order'))
-		if [question.order for question in questions] != [1, 2, 3, 4, 5]:
-			raise ValidationError('Exactly five questions numbered 1 through 5 are required.')
+		if [question.order for question in questions] != list(range(1, 11)):
+			raise ValidationError('Exactly ten questions numbered 1 through 10 are required.')
 		for question in questions:
 			try:
 				question.full_clean()
 			except ValidationError as error:
 				raise ValidationError(f'Question {question.order}: {error.messages}')
+			if question.question_type != 'multiple_choice':
+				raise ValidationError(f'Question {question.order} must be multiple choice.')
 
 	@classmethod
 	def _validate_approval(cls, assessment):
@@ -562,13 +541,13 @@ class AssessmentScheduleAttemptAdmin(admin.ModelAdmin):
 	list_filter = ('status', 'assessment__field', 'started_at', 'is_flagged')
 	search_fields = ('user__email', 'user__username', 'assessment__title')
 	readonly_fields = (
-		'user', 'assessment', 'answers', 'question_order', 'video_watched_seconds',
-		'video_completed', 'started_at', 'submitted_at', 'duration_seconds',
+		'user', 'assessment', 'answers', 'question_order', 'started_at',
+		'submitted_at', 'duration_seconds',
 		'tab_switches', 'time_anomalies', 'ip_address', 'user_agent',
 	)
 	fieldsets = (
 		(None, {'fields': ('user', 'assessment', 'status', 'score')}),
-		('Response data', {'fields': ('answers', 'question_order', 'video_watched_seconds', 'video_completed')}),
+		('Response data', {'fields': ('answers', 'question_order')}),
 		('Timing', {'fields': ('started_at', 'submitted_at', 'duration_seconds')}),
 		('Anti-cheat', {'fields': ('tab_switches', 'time_anomalies', 'ip_address', 'user_agent', 'is_flagged', 'flag_reason')}),
 	)
@@ -584,6 +563,204 @@ class AssessmentScheduleAttemptAdmin(admin.ModelAdmin):
 
 	def has_change_permission(self, request, obj=None):
 		return self.has_module_permission(request)
+
+	def has_delete_permission(self, request, obj=None):
+		return False
+
+
+@admin.register(SupportProgram)
+class SupportProgramAdmin(admin.ModelAdmin):
+	list_display = ('title', 'program_type', 'merit_cutoff', 'funding_status', 'status', 'deadline')
+	list_filter = ('program_type', 'funding_status', 'status')
+	search_fields = ('title', 'description', 'eligibility_rules')
+	readonly_fields = ('created_by', 'created_at', 'updated_at')
+
+	def has_module_permission(self, request):
+		return bool(request.user.is_authenticated and request.user.is_admin)
+
+	def has_view_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_add_permission(self, request):
+		return self.has_module_permission(request)
+
+	def has_change_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_delete_permission(self, request, obj=None):
+		return self.has_module_permission(request) and not (
+			obj is not None and obj.applications.exists()
+		)
+
+	def save_model(self, request, obj, form, change):
+		if not change:
+			obj.created_by = request.user
+		super().save_model(request, obj, form, change)
+		if obj.status in ('published', 'closed'):
+			transaction.on_commit(lambda program_id=obj.pk: reconcile_support_program(program_id))
+
+
+class SupportApplicationAdminForm(forms.ModelForm):
+	class Meta:
+		model = SupportApplication
+		fields = '__all__'
+
+	def clean(self):
+		cleaned_data = super().clean()
+		if not self.instance.pk:
+			return cleaned_data
+
+		previous = SupportApplication.objects.get(pk=self.instance.pk)
+		next_status = cleaned_data.get('status', previous.status)
+		allowed = {
+			'submitted': {'submitted', 'under_review', 'declined'},
+			'under_review': {'under_review', 'approved', 'awaiting_funding', 'declined'},
+			'approved': {'approved', 'awaiting_funding', 'payment_processing', 'declined'},
+			'awaiting_funding': {'awaiting_funding', 'payment_processing', 'declined'},
+			'payment_processing': {'payment_processing', 'paid', 'declined'},
+			'paid': {'paid'},
+			'declined': {'declined'},
+		}
+		if next_status not in allowed[previous.status]:
+			self.add_error('status', 'This application status transition is not allowed.')
+		if next_status == 'declined' and not (cleaned_data.get('admin_reason') or '').strip():
+			self.add_error('admin_reason', 'Provide the reason for declining this application.')
+		if next_status == 'paid' and not (cleaned_data.get('payment_reference') or '').strip():
+			self.add_error('payment_reference', 'Record the payment reference before confirming payment.')
+		if next_status in ('payment_processing', 'paid') and self.instance.program.funding_status != 'funded':
+			self.add_error('status', 'Mark the programme as funded before processing payment.')
+		return cleaned_data
+
+
+@admin.register(SupportApplication)
+class SupportApplicationAdmin(admin.ModelAdmin):
+	form = SupportApplicationAdminForm
+	list_display = (
+		'program_title_at_application', 'full_name', 'registered_phone_number',
+		'mpesa_number', 'merit_score_at_application',
+		'tutorial_consistency_weeks_at_application', 'status', 'submitted_at',
+	)
+	list_filter = ('status', 'program_type_at_application', 'submitted_at')
+	search_fields = (
+		'program_title_at_application', 'full_name', 'registered_phone_number',
+		'mpesa_number', 'user__email', 'payment_reference',
+	)
+	readonly_fields = (
+		'user', 'program', 'eligibility', 'program_title_at_application',
+		'program_type_at_application', 'eligibility_rules_at_application',
+		'merit_cutoff_at_application', 'full_name', 'registered_phone_number',
+		'mpesa_number', 'merit_score_at_application',
+		'tutorial_consistency_weeks_at_application', 'reviewed_by',
+		'payment_confirmed_by', 'payment_confirmed_at', 'submitted_at', 'updated_at',
+	)
+	fieldsets = (
+		('Applicant and programme', {'fields': (
+			'user', 'program', 'program_title_at_application',
+			'program_type_at_application', 'full_name',
+			'registered_phone_number', 'mpesa_number',
+		)}),
+		('Eligibility snapshot', {'fields': (
+			'eligibility', 'merit_cutoff_at_application',
+			'merit_score_at_application', 'tutorial_consistency_weeks_at_application',
+			'eligibility_rules_at_application',
+		)}),
+		('Review decision', {'fields': ('status', 'admin_reason', 'reviewed_by')}),
+		('Payment confirmation', {'fields': (
+			'payment_reference', 'payment_confirmed_at', 'payment_confirmed_by',
+		)}),
+		('Record', {'fields': ('submitted_at', 'updated_at')}),
+	)
+
+	def has_module_permission(self, request):
+		return bool(request.user.is_authenticated and request.user.is_admin)
+
+	def has_view_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_add_permission(self, request):
+		return False
+
+	def has_change_permission(self, request, obj=None):
+		return self.has_module_permission(request) and not (
+			obj is not None and obj.status in ('paid', 'declined')
+		)
+
+	def has_delete_permission(self, request, obj=None):
+		return False
+
+	def save_model(self, request, obj, form, change):
+		changed = False
+		if change:
+			previous = SupportApplication.objects.get(pk=obj.pk)
+			changed = (
+				obj.status != previous.status
+				or obj.admin_reason != previous.admin_reason
+				or obj.payment_reference != previous.payment_reference
+			)
+			if obj.status != previous.status:
+				obj.reviewed_by = request.user
+			if obj.status == 'paid' and previous.status != 'paid':
+				obj.payment_confirmed_by = request.user
+				obj.payment_confirmed_at = timezone.now()
+		super().save_model(request, obj, form, change)
+		if changed:
+			SupportApplicationEvent.objects.create(
+				application=obj,
+				actor=request.user,
+				status=obj.status,
+				reason=obj.admin_reason,
+				payment_reference=obj.payment_reference,
+			)
+
+
+@admin.register(SupportEligibility)
+class SupportEligibilityAdmin(admin.ModelAdmin):
+	list_display = (
+		'user', 'program', 'merit_score', 'merit_cutoff_at_eligibility',
+		'tutorial_consistency_weeks', 'eligible', 'notified_at',
+	)
+	list_filter = ('eligible', 'program')
+	search_fields = ('user__email', 'user__username', 'program__title')
+	readonly_fields = (
+		'user', 'program', 'merit_score', 'merit_cutoff_at_eligibility',
+		'completed_contests', 'tutorial_consistency_weeks', 'eligible',
+		'notified_at', 'created_at', 'updated_at',
+	)
+
+	def has_module_permission(self, request):
+		return bool(request.user.is_authenticated and request.user.is_admin)
+
+	def has_view_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_add_permission(self, request):
+		return False
+
+	def has_change_permission(self, request, obj=None):
+		return False
+
+	def has_delete_permission(self, request, obj=None):
+		return False
+
+
+@admin.register(SupportApplicationEvent)
+class SupportApplicationEventAdmin(admin.ModelAdmin):
+	list_display = ('application', 'status', 'actor', 'created_at')
+	list_filter = ('status', 'created_at')
+	search_fields = ('application__full_name', 'application__program_title_at_application', 'actor__email')
+	readonly_fields = ('application', 'actor', 'status', 'reason', 'payment_reference', 'created_at')
+
+	def has_module_permission(self, request):
+		return bool(request.user.is_authenticated and request.user.is_admin)
+
+	def has_view_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_add_permission(self, request):
+		return False
+
+	def has_change_permission(self, request, obj=None):
+		return False
 
 	def has_delete_permission(self, request, obj=None):
 		return False

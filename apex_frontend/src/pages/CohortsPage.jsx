@@ -23,8 +23,6 @@ export default function CohortsPage() {
   const [pspRegistrations, setPspRegistrations] = useState([])
   const [tier, setTier] = useState('10kes')
   const [paymentDetails, setPaymentDetails] = useState({ full_name: '', phone_number: '' })
-  const [videoWatchedSeconds, setVideoWatchedSeconds] = useState(0)
-  const [videoCompleted, setVideoCompleted] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -36,10 +34,10 @@ export default function CohortsPage() {
   useEffect(() => {
     if (!activeAttempt) return
     const id = setInterval(() => {
-      sendHeartbeat(activeAttempt.id, { tab_switch: false, time_anomaly: false, video_watched_seconds: videoWatchedSeconds, video_completed: videoCompleted }).catch(() => {})
+      sendHeartbeat(activeAttempt.id, { tab_switch: false, time_anomaly: false }).catch(() => {})
     }, 30000)
     return () => clearInterval(id)
-  }, [activeAttempt, videoWatchedSeconds, videoCompleted])
+  }, [activeAttempt])
 
   useEffect(() => {
     if (!activeAttempt) return
@@ -85,8 +83,6 @@ export default function CohortsPage() {
       setActiveAttempt(data)
       setActiveAssessment(assessment)
       setAnswers({})
-      setVideoWatchedSeconds(0)
-      setVideoCompleted(false)
       setView('assessment')
     } catch (err) {
       toast.error(err.response?.data?.error || 'Could not start assessment.')
@@ -95,7 +91,7 @@ export default function CohortsPage() {
 
   const handleSubmit = async () => {
     try {
-      const { data } = await submitAssessment(activeAssessment.id, answers, { video_watched_seconds: videoWatchedSeconds, video_completed: videoCompleted })
+      const { data } = await submitAssessment(activeAssessment.id, answers)
       toast.success(`${data.message} Score: ${data.score?.toFixed(1)}%`)
       setView('cohort')
       setActiveAttempt(null)
@@ -147,7 +143,7 @@ export default function CohortsPage() {
                   <div style={{ color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: '0.7rem', fontWeight: 700 }}>Assessment</div>
                   <h2 style={{ marginTop: '0.3rem', fontSize: '2rem', fontWeight: 800 }}>Open Cohorts</h2>
                 </div>
-                <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '999px', padding: '0.55rem 0.9rem', fontWeight: 700, color: '#e2e8f0' }}>Question 7 of 20</div>
+                <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '999px', padding: '0.55rem 0.9rem', fontWeight: 700, color: '#e2e8f0' }}>Question-based programmes</div>
               </div>
             </div>
 
@@ -222,15 +218,15 @@ export default function CohortsPage() {
           <div onCopy={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()} style={{ userSelect: 'none' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem', gap: '1rem', flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.14em', color: '#a78bfa', fontWeight: 700 }}>Question 7 of 20</div>
+                <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.14em', color: '#a78bfa', fontWeight: 700 }}>{activeAttempt.question_order?.length || 0} questions</div>
                 <h2 style={{ marginTop: '0.25rem', fontSize: '2rem', fontWeight: 800 }}>{activeAssessment.title}</h2>
               </div>
               <AssessmentTimer limitMinutes={activeAssessment.time_limit_minutes} startedAt={activeAttempt.started_at} onExpire={handleSubmit} />
             </div>
 
             <div style={{ background: 'rgba(15,23,42,0.82)', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '1rem', padding: '1.3rem', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.76rem', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700 }}>Scenario video</div>
-              <video controls controlsList="nodownload" src={activeAssessment.video_url} onTimeUpdate={(e) => setVideoWatchedSeconds(Math.floor(e.currentTarget.currentTime))} onEnded={() => setVideoCompleted(true)} style={{ width: '100%', maxHeight: '420px', borderRadius: '0.9rem', marginTop: '0.7rem' }} />
+              <div style={{ fontSize: '0.76rem', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700 }}>Assessment instructions</div>
+              <p style={{ marginTop: '0.7rem' }}>{activeAssessment.instructions}</p>
               <p style={{ color: 'var(--color-warning)', marginTop: '0.6rem' }}>Stay in a quiet place. Tab switches, unusual timing, and copied answers are recorded and may result in a zero score.</p>
             </div>
 
@@ -238,7 +234,7 @@ export default function CohortsPage() {
               <QuestionCard key={q.id || index} question={q} index={index} selected={answers[q.id || index]} onSelect={(qId, val) => setAnswers((prev) => ({ ...prev, [qId]: val }))} />
             ))}
 
-            <button onClick={handleSubmit} disabled={!videoCompleted} className="btn-primary" style={{ marginTop: '1rem', width: '100%' }}>{videoCompleted ? 'Submit Assessment' : 'Finish watching the video to submit'}</button>
+            <button onClick={handleSubmit} className="btn-primary" style={{ marginTop: '1rem', width: '100%' }}>Submit Assessment</button>
           </div>
         )}
       </div>

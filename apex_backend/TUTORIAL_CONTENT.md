@@ -1,78 +1,36 @@
-# Tutorial Content Operations
+# ApexStratos Question-Library Operations
 
-## Schedule
+## Programme targets
 
-The initial fixed schedule is defined by `apps/cohorts/tutorial_schedule.py`: 10 capability fields, months 1-2, four weeks per month, Monday-Thursday, and two slots per field/day. That defines 640 tutorial slots and 3,200 questions. The database allows month indices after month 2 without a schema change.
+| Library | Initial assessments | Questions per assessment | Initial questions | Student price |
+|---|---:|---:|---:|---|
+| Tutorial Library | 640 | 10 | 6,400 | Free |
+| Sponsored View Library | 800 | 10 | 8,000 | KSh 20 per attempt |
+| Main Contest Library | 720 | 10 | 7,200 | KSh 100 per applicable access period |
+| **Total** | **2,160** | **10** | **21,600** | Programme-specific |
 
-Tutorial schedule coordinates are unique per field, month, week, day and daily slot. Uploading or reading content never deletes a tutorial or question.
+These are target quantities, not live counts. Only complete, reviewed database records should be represented as available. Run `python manage.py audit_apexstratos_inventory --settings=apex_backend.settings.development` to report actual complete inventory and shortfalls. Sponsored View has no assessment, payment, attempt, or reward models in the current backend; its reported initial inventory is zero until those workflows are implemented.
 
-## Create and Publish
+## Question-first content
 
-Use the Django admin Tutorial form to create a Draft, upload its ApexStratos-owned video, set its schedule, objectives and difficulty, and author every teaching section. Add exactly five questions in order 1-5 in the inline question form. Correct answers and rationales are available only to admin users; the student API omits both.
+These programmes use structured written instruction, worked examples, MCQs, explanations, and optional written reasoning. There is no video playback, video upload, media approval, or external media-service dependency.
 
-The structured lesson sections cover concept explanation, terminology/components, why it matters, how it works, worked examples, common mistakes, practical application, decisions/trade-offs, and connections. Pair the two daily slots so that the second extends or applies the first. Do not use generic randomized questions or copied placeholder video clips.
+Each published assessment must contain exactly ten ordered multiple-choice questions, numbered 1 through 10. Each question must have at least two answer options and a correct answer that exactly matches one option. Add a written rationale explaining the correct reasoning; the student API withholds answer keys and rationales until a tutorial attempt is submitted.
 
-Use the admin actions in sequence:
+Tutorial lessons also require the structured written teaching sections and at least three learning objectives. Medical and Health and Law and Society content requires administrator-recorded expert review before approval.
 
-1. Draft to In Review: requires an uploaded video, all teaching sections, three or more objectives, and exactly questions 1-5.
-2. In Review to Approved: Medical & Health and Law & Society also require an admin attestation that appropriate expert review occurred.
-3. Approved to Published: rechecks publish requirements and exposes the tutorial only when `scheduled_for` is reached.
-4. Published to Archived: removes it from student discovery without deleting its record or attempts.
+## Administration
 
-Editing a tutorial in the admin returns it to Draft, so changes cannot silently replace reviewed live content.
+Administrators can create additional tutorials in Django Admin, add ten questions in the question inline, and use the review/approval/scheduling/publication actions. Main Contest assessments can also be added in Django Admin and require a 20-minute duration, at least three learning objectives, and ten valid questions. Historical records with attempts are protected from editing/deletion; new content is added as separate records.
 
-## One-Click Daily Upload
+Tutorial schedule coordinates use `month` and local `week` values (weeks 1–4 in each month). Student library filters expose the combined initial Week 1–8 sequence. Main contest availability remains controlled by the published Friday–Sunday schedule and server-side attempt rules; library browsing does not grant access.
 
-In Django Admin, open **Tutorials** and click **Upload tutorials for a day**. Choose month, week, weekday, schedule time, and one ZIP file. The ZIP must contain exactly `manifest.json` and 20 distinct internal MP4 files beneath `videos/`.
+## Weekly access and attempt timing
 
-The JSON manifest has this structure (the text below is an abbreviated shape, not lesson content; every section must contain substantive, field-specific teaching):
+The backend is authoritative for the weekly calendar and uses the `Africa/Nairobi` timezone. Tutorial and Sponsored View start windows are Monday 00:00 through Friday 00:00 EAT; Main Contest starts are permitted Friday 00:00 through Monday 00:00 EAT. Boundaries are exclusive at the closing instant. Students may start at any time inside an open window; `scheduled_for` is not an individual appointment or release time.
 
-```json
-{
-	"tutorials": [
-		{
-			"field": "Software Development",
-			"daily_slot": 1,
-			"title": "A descriptive field-specific lesson title",
-			"description": "What the practitioner will understand and apply",
-			"learning_objectives": ["Explain", "Apply", "Reason"],
-			"difficulty": "foundation",
-			"duration_minutes": 20,
-			"video_path": "videos/software-development-1.mp4",
-			"concept_explanation": "Authored lesson section",
-			"terminology_and_components": "Authored lesson section",
-			"why_it_matters": "Authored lesson section",
-			"how_it_works": "Authored lesson section",
-			"worked_examples": "Authored lesson section",
-			"common_mistakes": "Authored lesson section",
-			"practical_application": "Authored lesson section",
-			"decisions_and_tradeoffs": "Authored lesson section",
-			"related_concepts": "Authored lesson section",
-			"questions": [
-				{
-					"order": 1,
-					"question_type": "multiple_choice",
-					"prompt": "A practical scenario question connected to this lesson...",
-					"options": ["Option A", "Option B", "Option C"],
-					"correct_answer": "Option A",
-					"rationale": "Why this response best follows the taught reasoning"
-				}
-			]
-		}
-	]
-}
-```
+An attempt timer begins when the server creates the attempt. The server returns the start time and deadline, preserves saved answers on resume, and rejects saves or submissions at/after the deadline. An attempt cannot outlast its activity's weekly window. Tutorial and Main Contest start endpoints enforce their windows independently of the frontend. The schedule endpoint reports current availability and the next opening period. Sponsored View follows the same published Monday–Thursday window, but remains non-startable until its backend assessment, payment, and attempt workflows are implemented.
 
-Include two complementary records for each of the ten exact capability-field names and five questions per record, numbered 1 through 5. All 20 video paths must be distinct. The uploader validates the complete day before creating any records, enforces a 1.5 GB ZIP cap and 300 MB per video, verifies MP4 signatures, and refuses a duplicate schedule day. A valid upload creates Drafts only; it does not approve or publish content.
+## Content status
 
-For the first admin account, run `python manage.py setup_founder_admin` in a trusted backend terminal and enter a newly rotated password at the hidden prompts. This updates/creates the founder email and username as configured by that command; the password is never a command-line argument or stored in the repository. Rotate any credentials that have been pasted into chat before doing this.
-
-## Initial Library Verification
-
-Run from `apex_backend` after applying migrations and uploading actual content:
-
-```powershell
-python manage.py audit_initial_tutorial_library --settings=apex_backend.settings.development
-```
-
-The command checks published tutorial records, uploaded internal video references, and question totals for months 1-2. It fails until the actual 640 videos and 3,200 authored questions are present. It does not generate lessons, questions, or video placeholders.
+The local development database was audited read-only during implementation. It contained zero Tutorial records and zero Main Contest records. No approved question-content corpus for the required 2,160 assessments was present in the repository. The legacy video-placeholder seeding commands were removed; the platform must not seed fictional questions or advertise target quantities as if they were populated. Import or author reviewed content before declaring the libraries complete.
