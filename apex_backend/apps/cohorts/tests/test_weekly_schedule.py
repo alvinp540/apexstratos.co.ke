@@ -105,6 +105,7 @@ class TutorialScheduleAccessTests(TestCase):
             title='Weekly schedule test',
             description='Test content for weekly schedule access.',
             learning_objectives=['Identify', 'Explain', 'Apply'],
+            duration_minutes=30,
             concept_explanation='Concept.',
             terminology_and_components='Terminology.',
             why_it_matters='Importance.',
@@ -162,6 +163,28 @@ class TutorialScheduleAccessTests(TestCase):
         self.assertEqual(listing.data['count'], 1)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(started.status_code, 201)
+
+    def test_tutorial_timer_uses_configured_duration_and_enforces_it_server_side(self):
+        started_at = eat_datetime(2026, 10, 12, 10)
+        with patch('apps.cohorts.views.timezone.now', return_value=started_at):
+            started = self.start()
+
+        self.assertEqual(started.status_code, 201)
+        self.assertEqual(
+            started.data['deadline_at'],
+            started_at + timedelta(minutes=30),
+        )
+        with patch(
+            'apps.cohorts.views.timezone.now',
+            return_value=started_at + timedelta(minutes=30),
+        ):
+            expired = self.client.post(
+                reverse('tutorial-attempt-answers', kwargs={'attempt_id': started.data['id']}),
+                {'answers': {started.data['questions'][0]['id']: 'A'}, 'reasoning': {}},
+                format='json',
+            )
+
+        self.assertEqual(expired.status_code, 410)
 
     def test_resume_uses_same_attempt_and_original_deadline_then_times_out(self):
         started_at = eat_datetime(2026, 10, 15, 10)

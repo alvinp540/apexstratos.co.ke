@@ -128,7 +128,8 @@ def _tutorial_attempt_response(attempt, *, reveal_answers=False):
         public_questions.append(item)
     now = timezone.now()
     try:
-        deadline = attempt_deadline('tutorials', attempt.started_at)
+        duration_seconds = (attempt.tutorial.duration_minutes or 20) * 60
+        deadline = attempt_deadline('tutorials', attempt.started_at, duration_seconds)
     except ValueError:
         deadline = None
     return {
@@ -180,7 +181,11 @@ class StartTutorialAttemptView(APIView):
                         {'error': 'This tutorial attempt is no longer active.'},
                         status=status.HTTP_409_CONFLICT,
                     )
-                deadline = attempt_deadline('tutorials', attempt.started_at)
+                deadline = attempt_deadline(
+                    'tutorials',
+                    attempt.started_at,
+                    (tutorial.duration_minutes or 20) * 60,
+                )
                 if now >= deadline:
                     attempt.status = 'timed_out'
                     attempt.submitted_at = now
@@ -247,7 +252,11 @@ class SaveTutorialAttemptView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             now = timezone.now()
-            if now >= attempt_deadline('tutorials', attempt.started_at):
+            if now >= attempt_deadline(
+                'tutorials',
+                attempt.started_at,
+                (attempt.tutorial.duration_minutes or 20) * 60,
+            ):
                 attempt.status = 'timed_out'
                 attempt.submitted_at = now
                 attempt.save(update_fields=('status', 'submitted_at'))
@@ -312,7 +321,11 @@ class SubmitTutorialAttemptView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             now = timezone.now()
-            deadline = attempt_deadline('tutorials', attempt.started_at)
+            deadline = attempt_deadline(
+                'tutorials',
+                attempt.started_at,
+                (attempt.tutorial.duration_minutes or 20) * 60,
+            )
             if now >= deadline:
                 attempt.status = 'timed_out'
                 attempt.submitted_at = now

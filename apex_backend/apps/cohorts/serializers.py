@@ -106,7 +106,8 @@ class TutorialSerializer(serializers.ModelSerializer):
 
         from .weekly_schedule import attempt_deadline
         try:
-            deadline = attempt_deadline('tutorials', attempt.started_at)
+            duration_seconds = (obj.duration_minutes or 20) * 60
+            deadline = attempt_deadline('tutorials', attempt.started_at, duration_seconds)
         except ValueError:
             deadline = None
         now = timezone.now()
