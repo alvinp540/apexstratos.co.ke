@@ -1,3 +1,4 @@
+import copy
 import json
 from io import StringIO
 import tempfile
@@ -65,10 +66,10 @@ class AssessmentImportTests(TestCase):
             'schema_version': 1,
             'provenance': {
                 'title': 'Original test material',
-                'author': 'ApexStratos content team',
-                'license': 'CC0-1.0',
-                'attribution': 'Original content written for importer tests.',
-                'reference': 'https://example.invalid/test-fixture',
+                'author': 'ApexStratos automated test fixture',
+                'license': 'Test-only',
+                'attribution': 'Synthetic fixture content created exclusively for automated tests.',
+                'reference': 'apps/cohorts/tests/test_content_import.py',
             },
             'assessments': [assessment],
         }
@@ -110,8 +111,8 @@ class AssessmentImportTests(TestCase):
         tutorial = Tutorial.objects.get()
         self.assertEqual(tutorial.status, 'draft')
         self.assertEqual(tutorial.imported_external_id, 'software-api-contract-week-1')
-        self.assertEqual(tutorial.content_license, 'CC0-1.0')
-        self.assertIn('https://example.invalid/test-fixture', tutorial.content_source)
+        self.assertEqual(tutorial.content_license, 'Test-only')
+        self.assertIn('apps/cohorts/tests/test_content_import.py', tutorial.content_source)
         self.assertEqual(TutorialQuestion.objects.filter(tutorial=tutorial).count(), 10)
 
     def test_sponsored_view_pack_imports_mcq_questions_without_type_field(self):
@@ -176,6 +177,65 @@ class AssessmentImportTests(TestCase):
             self.run_import(pack)
 
         self.assertEqual(Tutorial.objects.count(), 0)
+
+    def test_pack_rejects_duplicate_assessment_question_sets(self):
+        pack = self.make_pack()
+        duplicate = dict(pack['assessments'][0])
+        duplicate.update({
+            'external_id': 'software-api-contract-week-1-duplicate',
+            'day': 1,
+            'slot': 2,
+            'title': 'A second title cannot disguise a duplicate assessment',
+        })
+        pack['assessments'].append(duplicate)
+
+        with self.assertRaisesRegex(CommandError, 'duplicates a complete assessment question set'):
+            self.run_import(pack)
+
+        self.assertEqual(Tutorial.objects.count(), 0)
+
+    def test_pack_rejects_repeated_prompts_across_assessments(self):
+        pack = self.make_pack()
+        duplicate = copy.deepcopy(pack['assessments'][0])
+        duplicate.update({
+            'external_id': 'software-api-contract-week-1-repeated-prompt',
+            'day': 1,
+            'slot': 2,
+            'title': 'A distinct assessment with one repeated prompt',
+        })
+        for question in duplicate['questions'][1:]:
+            question['prompt'] = 'A distinct scenario asks: ' + question['prompt']
+        pack['assessments'].append(duplicate)
+
+        with self.assertRaisesRegex(CommandError, 'duplicates a question in assessments'):
+            self.run_import(pack)
+
+        self.assertEqual(Tutorial.objects.count(), 0)
+
+    def test_importer_never_publishes_directly_from_a_pack(self):
+        pack = self.make_pack()
+
+        with self.assertRaisesRegex(CommandError, 'unrecognized arguments: --publish'):
+            self.run_import(pack, '--apply', '--publish')
+
+        self.assertEqual(Tutorial.objects.count(), 0)
+
+    def test_pack_cannot_set_human_expert_review(self):
+        pack = self.make_pack()
+        pack['assessments'][0]['expert_reviewed'] = True
+
+        with self.assertRaisesRegex(CommandError, 'only an administrator can record human expert review'):
+            self.run_import(pack)
+
+        self.assertEqual(Tutorial.objects.count(), 0)
+
+    def test_bootstrap_rejects_duplicate_bundle_without_writing_records(self):
+        with self.assertRaisesRegex(CommandError, 'failed validation'):
+            call_command('bootstrap_apexstratos_libraries', stdout=StringIO())
+
+        self.assertEqual(Tutorial.objects.count(), 0)
+        self.assertEqual(SponsoredViewAssessment.objects.count(), 0)
+        self.assertEqual(AssessmentSchedule.objects.count(), 0)
 
     def test_inventory_audit_excludes_duplicate_contest_assessment_content(self):
         for slot in (1, 2):

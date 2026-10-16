@@ -61,6 +61,8 @@ def _validate_pack(payload, library):
 
     seen_ids = set()
     seen_slots = set()
+    seen_assessment_fingerprints = set()
+    seen_question_prompts = {}
     for index, item in enumerate(assessments):
         location = f'assessments[{index}]'
         if not isinstance(item, dict):
@@ -109,6 +111,10 @@ def _validate_pack(payload, library):
             _required_text(item.get(key), f'{location}.{key}', errors)
         if item.get('difficulty', 'foundation') not in DIFFICULTIES:
             errors.append(f'{location}.difficulty: unsupported difficulty.')
+        if item.get('expert_reviewed') is True:
+            errors.append(
+                f'{location}.expert_reviewed: only an administrator can record human expert review.'
+            )
         objectives = item.get('learning_objectives')
         if (
             not isinstance(objectives, list)
@@ -136,17 +142,12 @@ def _validate_pack(payload, library):
             )
         ):
             errors.append(f'{location}.passing_score: use a number from 0 to 100.')
-        if (
-            field in {'Medical and Health', 'Law and Society'}
-            and item.get('expert_reviewed') is not True
-        ):
-            errors.append(f'{location}.expert_reviewed: Medical and Health and Law and Society content requires expert review.')
-
         questions = item.get('questions')
         if not isinstance(questions, list) or len(questions) != 10:
             errors.append(f'{location}.questions: exactly ten questions are required.')
             continue
         prompts = set()
+        fingerprint_questions = []
         for question_index, question in enumerate(questions):
             question_location = f'{location}.questions[{question_index}]'
             if not isinstance(question, dict):
@@ -160,6 +161,13 @@ def _validate_pack(payload, library):
             if normalized_prompt and normalized_prompt in prompts:
                 errors.append(f'{question_location}.prompt: duplicated within this assessment.')
             prompts.add(normalized_prompt)
+            if normalized_prompt in seen_question_prompts:
+                previous_location = seen_question_prompts[normalized_prompt]
+                errors.append(
+                    f'{question_location}.prompt: duplicates a question in {previous_location}.'
+                )
+            elif normalized_prompt:
+                seen_question_prompts[normalized_prompt] = question_location
             options = question.get('options')
             if (
                 not isinstance(options, list)
@@ -179,6 +187,27 @@ def _validate_pack(payload, library):
             _required_text(question.get('rationale'), f'{question_location}.rationale', errors)
             if 'requires_reasoning' in question and not isinstance(question['requires_reasoning'], bool):
                 errors.append(f'{question_location}.requires_reasoning: expected true or false.')
+            if (
+                normalized_prompt
+                and isinstance(options, list)
+                and all(isinstance(option, str) and option.strip() for option in options)
+                and isinstance(answer, str)
+            ):
+                fingerprint_questions.append({
+                    'prompt': normalized_prompt,
+                    'options': sorted(' '.join(option.casefold().split()) for option in options),
+                    'answer': ' '.join(answer.casefold().split()),
+                })
+        if len(fingerprint_questions) == 10:
+            fingerprint = json.dumps(
+                sorted(fingerprint_questions, key=lambda question: question['prompt']),
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(',', ':'),
+            )
+            if fingerprint in seen_assessment_fingerprints:
+                errors.append(f'{location}.questions: duplicates a complete assessment question set in this pack.')
+            seen_assessment_fingerprints.add(fingerprint)
 
     if errors:
         raise CommandError('Invalid content pack:\n- ' + '\n- '.join(errors[:100]))
@@ -207,7 +236,10 @@ class Command(BaseCommand):
             raise CommandError(f'Content pack is not valid JSON: {error}') from error
 
         library = options['library']
-        assessments = _validate_pack(payload, library)
+        try:
+            assessments = _validate_pack(payload, library)
+        except CommandError as error:
+            raise CommandError(f'Content pack {path} failed validation: {error}') from error
         models = {
             'tutorials': (Tutorial, TutorialQuestion),
             'sponsored-view': (SponsoredViewAssessment, SponsoredViewQuestion),
