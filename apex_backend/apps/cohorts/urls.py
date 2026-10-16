@@ -14,6 +14,7 @@ from .views import (
 from .programme_views import (
     ContestAssessmentListView,
     ContestLibraryView,
+    MyContestCycleLeaderboardView,
     ParticipationPaymentAdminListView,
     ParticipationPaymentDecisionView,
     ParticipationPaymentListCreateView,
@@ -25,6 +26,7 @@ from .support_views import (
     SupportApplicationCreateView,
     SupportApplicationAdminDecisionView,
     SupportApplicationAdminListView,
+    SupportApplicationInformationView,
     SupportApplicationListView,
     SupportProgramListView,
 )
@@ -50,6 +52,7 @@ urlpatterns = [
     path('admin/sponsored-view/payments/<uuid:payment_id>/decision/', SponsoredViewPaymentDecisionView.as_view(), name='sponsored-view-payment-admin-decision'),
     path('support/programs/', SupportProgramListView.as_view(), name='support-program-list'),
     path('support/applications/', SupportApplicationListView.as_view(), name='support-application-list'),
+    path('support/applications/<uuid:application_id>/information/', SupportApplicationInformationView.as_view(), name='support-application-information'),
     path('admin/support/applications/', SupportApplicationAdminListView.as_view(), name='support-application-admin-list'),
     path('admin/support/applications/<uuid:application_id>/decision/', SupportApplicationAdminDecisionView.as_view(), name='support-application-admin-decision'),
     path('support/programs/<uuid:program_id>/applications/', SupportApplicationCreateView.as_view(), name='support-application-create'),
@@ -64,6 +67,7 @@ urlpatterns = [
     path('admin/payments/main-contest/<uuid:payment_id>/decision/', ParticipationPaymentDecisionView.as_view(), name='main-contest-payment-decision'),
     path('contests/', ContestAssessmentListView.as_view(), name='contest-assessment-list'),
     path('contests/library/', ContestLibraryView.as_view(), name='contest-assessment-library'),
+    path('contests/leaderboard/me/', MyContestCycleLeaderboardView.as_view(), name='contest-cycle-leaderboard-me'),
     path('contests/<uuid:assessment_id>/start/', StartContestAssessmentView.as_view(), name='contest-assessment-start'),
     path('contests/attempts/<uuid:attempt_id>/answers/', SaveContestAttemptAnswersView.as_view(), name='contest-assessment-answers'),
     path('contests/attempts/<uuid:attempt_id>/submit/', SubmitContestAssessmentView.as_view(), name='contest-assessment-submit'),

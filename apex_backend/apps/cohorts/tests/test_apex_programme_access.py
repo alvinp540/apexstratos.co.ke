@@ -15,7 +15,12 @@ from apps.cohorts.models import (
     AssessmentScheduleQuestion,
     ParticipationPayment,
     ParticipationPaymentEvent,
+    SupportApplication,
+    SupportEligibility,
+    SupportProgram,
 )
+from apps.notifications.models import Notification
+from apps.profiles.models import Profile
 
 from apps.cohorts.programme_views import _attempt_deadline, contest_window_for
 
@@ -322,6 +327,141 @@ class MainContestAccessTests(APITestCase):
         )
         self.assertNotIn('correct_answer', first.data['questions'][0])
         self.assertEqual(AssessmentScheduleAttempt.objects.count(), 1)
+
+    def test_verified_contest_to_opportunity_application_and_confirmed_payment(self):
+        Profile.objects.create(
+            user=self.student,
+            full_name='Student One',
+            profession='software_development',
+        )
+        program = SupportProgram.objects.create(
+            title='Verified Merit Support',
+            description='Support after verified contest performance.',
+            program_type='philanthropic_support',
+            eligibility_rules='At least 70% verified Main Contest average.',
+            merit_cutoff=70,
+            status='published',
+        )
+        self.grant_main_contest_access()
+        assessment = self.make_published_assessment()
+        sunday = timezone.make_aware(
+            datetime(2026, 10, 18, 12, 0),
+            ZoneInfo('Africa/Nairobi'),
+        )
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=sunday):
+            started = self.client.post(
+                reverse('contest-assessment-start', kwargs={'assessment_id': assessment.id}),
+                {},
+                format='json',
+            )
+            submitted = self.client.post(
+                reverse('contest-assessment-submit', kwargs={'attempt_id': started.data['id']}),
+                {'answers': {question['id']: 'A' for question in started.data['questions']}},
+                format='json',
+            )
+
+        self.assertEqual(started.status_code, 201)
+        self.assertEqual(submitted.status_code, 200)
+        self.assertEqual(submitted.data['score'], 100)
+        self.assertTrue(SupportEligibility.objects.get(user=self.student, program=program).eligible)
+        self.assertTrue(Notification.objects.filter(user=self.student, notification_type='opportunity').exists())
+
+        programs = self.client.get(reverse('support-program-list'))
+        self.assertTrue(programs.data['results'][0]['eligible'])
+        application = self.client.post(
+            reverse('support-application-create', kwargs={'program_id': program.id}),
+            {
+                'full_name': 'Student One',
+                'registered_phone_number': '0712345678',
+                'mpesa_number': '0712345678',
+            },
+            format='json',
+        )
+        self.assertEqual(application.status_code, 201)
+        application_id = application.data['id']
+
+        administrator = User.objects.create_user(
+            email='journey-admin@example.test',
+            username='journey-admin',
+            password='temporary-test-only',
+            role='admin',
+            is_staff=True,
+        )
+        self.client.force_authenticate(administrator)
+        for next_status in ('under_review', 'approved'):
+            decision = self.client.post(
+                reverse('support-application-admin-decision', kwargs={'application_id': application_id}),
+                {'status': next_status, 'admin_reason': 'Eligibility and details reviewed.'},
+                format='json',
+            )
+            self.assertEqual(decision.status_code, 200)
+        program.funding_status = 'funded'
+        program.save(update_fields=['funding_status'])
+        for next_status in ('payment_processing', 'paid'):
+            decision = self.client.post(
+                reverse('support-application-admin-decision', kwargs={'application_id': application_id}),
+                {
+                    'status': next_status,
+                    'admin_reason': 'Payment confirmed.' if next_status == 'paid' else 'Processing payment.',
+                    'payment_reference': 'JOURNEY-REF',
+                },
+                format='json',
+            )
+            self.assertEqual(decision.status_code, 200, decision.data)
+
+        self.client.force_authenticate(self.student)
+        tracked = self.client.get(reverse('support-application-list'))
+        self.assertEqual(tracked.status_code, 200)
+        self.assertEqual(tracked.data[0]['status'], 'paid')
+        self.assertIsNotNone(tracked.data[0]['payment_confirmed_at'])
+        self.assertEqual(SupportApplication.objects.get(id=application_id).payment_confirmed_by, administrator)
+
+    def test_contest_cycle_leaderboard_reports_eat_rank_and_ties(self):
+        assessment = self.make_published_assessment()
+        friday = timezone.make_aware(
+            datetime(2026, 10, 16, 10, 0),
+            ZoneInfo('Africa/Nairobi'),
+        )
+        AssessmentScheduleAttempt.objects.create(
+            user=self.student,
+            assessment=assessment,
+            status='graded',
+            score=90,
+            submitted_at=friday,
+        )
+        peer = User.objects.create_user(
+            email='cycle-peer@example.test',
+            username='cycle-peer',
+            password='temporary-test-only',
+        )
+        AssessmentScheduleAttempt.objects.create(
+            user=peer,
+            assessment=assessment,
+            status='graded',
+            score=90,
+            submitted_at=friday + timedelta(minutes=5),
+        )
+        lower_ranked = User.objects.create_user(
+            email='cycle-lower@example.test',
+            username='cycle-lower',
+            password='temporary-test-only',
+        )
+        AssessmentScheduleAttempt.objects.create(
+            user=lower_ranked,
+            assessment=assessment,
+            status='graded',
+            score=80,
+            submitted_at=friday + timedelta(minutes=10),
+        )
+
+        response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['rank'], 1)
+        self.assertEqual(response.data['participant_count'], 3)
+        self.assertEqual(response.data['average_score'], 90)
+        self.assertEqual(response.data['cycle_start'], friday.replace(hour=0, minute=0))
+        self.assertIn('equal averages share a rank', response.data['ranking_method'])
 
     def test_assessment_attempt_resumes_with_fixed_deadline_after_content_edit(self):
         self.grant_main_contest_access()

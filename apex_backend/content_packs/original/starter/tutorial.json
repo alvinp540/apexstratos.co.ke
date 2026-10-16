@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "title": "ApexStratos Capability Starter Pack",
+    "author": "ApexStratos Product Education",
+    "license": "ApexStratos Original",
+    "attribution": "Original learning content prepared for the ApexStratos starter library; not human expert-reviewed.",
+    "reference": "content_packs/original/starter/tutorial.json"
+  },
+  "assessments": [
+    {
+      "external_id": "apex-starter-software-tutorial-w1-v1",
+      "week": 1,
+      "day": 0,
+      "slot": 1,
+      "field": "Software Development",
+      "title": "Turn a learner need into testable software evidence",
+      "description": "Learn how to translate a real learner need into a small software outcome, verify that outcome, and record evidence of capability without confusing payment or attendance with merit.",
+      "difficulty": "foundation",
+      "duration_minutes": 15,
+      "learning_objectives": [
+        "Translate a user need into observable acceptance criteria.",
+        "Choose evidence that demonstrates capability rather than activity or access.",
+        "Explain how fair assessment, verified performance, and published rules support credible merit."
+      ],
+      "concept_explanation": "A useful software feature starts with a user need, an observable outcome, and a way to verify that outcome. ApexStratos follows the same evidence-first principle: learning and practice develop capability, while assessment results record demonstrated performance. Access fees never buy a score, rank, or award.",
+      "terminology_and_components": "A requirement states a need or condition. Acceptance criteria make the expected behavior testable. A test provides repeatable evidence about that behavior. A verified assessment result records performance under stated rules. Merit is based on credible evidence, not on purchasing access.",
+      "why_it_matters": "When a team measures the wrong thing, a feature may appear successful without helping its users. When a merit system treats payment or participation alone as achievement, its results are not trustworthy. Clear criteria protect both product quality and fairness.",
+      "how_it_works": "Identify the user and the problem, describe the smallest useful behavior, write observable acceptance criteria, test realistic and boundary cases, and keep a traceable record of the result. For an assessment, read the published access conditions, complete the work yourself, and rely on the server-recorded score.",
+      "worked_examples": "Need: a learner wants to revisit a completed lesson. Criterion: after signing in, the learner can reopen the lesson and see its recorded completion and best score. Evidence: an authenticated test completes a lesson, reloads the page, and confirms that the same progress is returned.",
+      "common_mistakes": "Counting logins, clicks, payment, or time spent as proof that a learning outcome was achieved. Writing criteria such as 'make it easy' without an observable check. Treating an eligibility signal or leaderboard position as a guaranteed payment.",
+      "practical_application": "Choose one learner task in ApexStratos. Write a user need, one observable success criterion, one invalid or boundary case, and the evidence you would retain to show whether the task works.",
+      "decisions_and_tradeoffs": "Collect enough evidence to make a fair decision while limiting unnecessary personal data. A simple criterion is easier to explain, but complex capability may require several complementary observations. Publish the rules before assessing and review them when evidence exposes an unfair barrier.",
+      "related_concepts": "Requirements engineering, acceptance testing, accessibility, data minimization, assessment validity, academic integrity, verified performance, merit, and transparent opportunity eligibility.",
+      "questions": [
+        {
+          "order": 1,
+          "prompt": "A learner asks for a way to resume a tutorial after signing back in. Which acceptance criterion would let a developer test whether the need is met?",
+          "options": [
+            "The tutorial page should feel modern and inspiring to every learner.",
+            "After signing in again, the learner can reopen the tutorial and see the saved completion state.",
+            "The learner should spend more time on the tutorial page.",
+            "The application should display a welcome message after every page refresh."
+          ],
+          "correct_answer": "After signing in again, the learner can reopen the tutorial and see the saved completion state.",
+          "rationale": "A useful acceptance criterion describes an observable result under stated conditions. Reopening the saved tutorial and checking its completion state directly verifies the learner's need; visual impressions and time spent do not."
+        },
+        {
+          "order": 2,
+          "prompt": "A team wants to know whether its assessment submission endpoint preserves a student's result after a network interruption. Which evidence is strongest?",
+          "options": [
+            "A screenshot of the assessment before the student submits any answers.",
+            "A count of how many students opened the assessment page.",
+            "An automated test that submits answers, simulates a retry, and confirms one persisted graded result.",
+            "A note that the endpoint worked on a developer's computer last month."
+          ],
+          "correct_answer": "An automated test that submits answers, simulates a retry, and confirms one persisted graded result.",
+          "rationale": "The claim concerns reliable submission and persistence. A repeatable test that exercises a retry and inspects the stored result is direct evidence; views, screenshots, and recollection do not establish that behavior."
+        },
+        {
+          "order": 3,
+          "prompt": "Two learners complete the same assessment. One paid the required access fee earlier, but both answers are scored by the same published key. What should determine their assessment scores?",
+          "options": [
+            "The answers submitted and the published scoring rules, applied equally to both learners.",
+            "The amount each learner paid, because higher fees indicate greater commitment.",
+            "The order in which they paid, with earlier payments receiving more points.",
+            "An administrator's impression of which learner is more deserving."
+          ],
+          "correct_answer": "The answers submitted and the published scoring rules, applied equally to both learners.",
+          "rationale": "A fee may satisfy an access rule, but it must not buy merit. Scores should follow submitted performance and the published scoring rules, applied consistently."
+        },
+        {
+          "order": 4,
+          "prompt": "A feature requirement says, 'Students can see whether an assessment submission was accepted.' Which test best checks that requirement?",
+          "options": [
+            "Confirm that the submit button uses the brand's primary color.",
+            "Ask a developer whether the request probably reached the server.",
+            "Count the number of assessments in the database.",
+            "Submit a valid response and verify that the interface displays the server's accepted result."
+          ],
+          "correct_answer": "Submit a valid response and verify that the interface displays the server's accepted result.",
+          "rationale": "The requirement is about accepted submissions being communicated to students. A test must submit a valid response and inspect the resulting state, not unrelated styling or record totals."
+        },
+        {
+          "order": 5,
+          "prompt": "A student receives a low score and wants to improve. Which feedback is most useful for the next learning step?",
+          "options": [
+            "You are not talented enough for this field.",
+            "Your result was low, so keep trying without changing your approach.",
+            "Review the explanation for the missed questions, practise the related skill, then use a later eligible assessment to check improvement.",
+            "Pay for another attempt immediately because payment raises your merit."
+          ],
+          "correct_answer": "Review the explanation for the missed questions, practise the related skill, then use a later eligible assessment to check improvement.",
+          "rationale": "Actionable feedback connects an observed gap to a learning activity and a future way to evaluate improvement. It should support development rather than label the learner or imply that payment changes performance."
+        },
+        {
+          "order": 6,
+          "prompt": "A learner can demonstrate a programming concept with a screen reader but cannot use a timed drag-and-drop widget. The widget interaction is not part of the learning objective. What is the fairest design response?",
+          "options": [
+            "Keep the widget unchanged because identical controls always create equal assessment conditions.",
+            "Offer an accessible response method that measures the same programming concept and verify that it preserves the criterion.",
+            "Remove the programming objective for this learner.",
+            "Award full marks without asking the learner to demonstrate the concept."
+          ],
+          "correct_answer": "Offer an accessible response method that measures the same programming concept and verify that it preserves the criterion.",
+          "rationale": "A response mode should not introduce a barrier unrelated to the capability being measured. An accessible alternative can preserve the same criterion while allowing the learner to demonstrate the target skill."
+        },
+        {
+          "order": 7,
+          "prompt": "A frontend developer needs to show multiple-choice options before submission. Which API design best protects assessment integrity?",
+          "options": [
+            "Return the options to the student but keep correct answers and rationales server-side until grading.",
+            "Return correct answers in a hidden HTML attribute so the interface can grade instantly.",
+            "Send the answer key to the browser and rely on minification to conceal it.",
+            "Store the answer key in a public static JSON file used by the assessment page."
+          ],
+          "correct_answer": "Return the options to the student but keep correct answers and rationales server-side until grading.",
+          "rationale": "Anything delivered to a browser can be inspected. The server should retain answer keys, score submitted answers, and reveal explanations only at the appropriate post-submission stage."
+        },
+        {
+          "order": 8,
+          "prompt": "An opportunity requires a published minimum verified assessment score. A student has paid for access but has not submitted an assessment. What is the accurate eligibility decision?",
+          "options": [
+            "Eligible, because completing payment satisfies every merit condition.",
+            "Eligible, because purchasing access is equivalent to achieving the minimum score.",
+            "Award the average score of all students who paid that week.",
+            "Not yet eligible under this criterion; the student still needs a verified result that meets the published score rule."
+          ],
+          "correct_answer": "Not yet eligible under this criterion; the student still needs a verified result that meets the published score rule.",
+          "rationale": "Payment is an access transaction, not performance evidence. Eligibility must be evaluated against the stated verified-score criterion, and the student should be told what evidence is still needed."
+        },
+        {
+          "order": 9,
+          "prompt": "A student asks why their progress page shows a completed tutorial but no contest result. What should the product communicate?",
+          "options": [
+            "A completed tutorial is automatically recorded as a contest score.",
+            "Tutorial completion and contest performance are separate records; the contest result appears after a contest is submitted and graded.",
+            "The contest score can be inferred from the student's tutorial completion date.",
+            "The student should create a second account to move tutorial progress into the contest."
+          ],
+          "correct_answer": "Tutorial completion and contest performance are separate records; the contest result appears after a contest is submitted and graded.",
+          "rationale": "Different activities produce different evidence. Clear records prevent tutorial participation from being misrepresented as contest performance and explain the legitimate next step."
+        },
+        {
+          "order": 10,
+          "prompt": "A team is preparing an assessment about whether learners can apply acceptance criteria to a new feature. Which question best aligns with that objective?",
+          "options": [
+            "Which month was the programming language first released?",
+            "How many pages are in the team's planning document?",
+            "Given a feature request and several proposed checks, which check most directly verifies the expected user-visible behavior?",
+            "Which team member has the longest job title?"
+          ],
+          "correct_answer": "Given a feature request and several proposed checks, which check most directly verifies the expected user-visible behavior?",
+          "rationale": "An assessment item should require the intended capability: applying acceptance criteria to a feature. Trivia and unrelated document facts do not measure that learning objective."
+        }
+      ]
+    }
+  ]
+}

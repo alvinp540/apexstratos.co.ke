@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { studyAreas } from '../data'
 import { Loading } from '../components/States'
 import Page from '../components/Page'
+import { applyForSupportProgram, getSupportApplications, submitSupportApplicationInformation } from '../api/cohortAPI'
+import SupportApplicationFields from '../components/SupportApplicationFields'
 
 export function Landing() {
   return <div className="landing">
@@ -72,7 +74,16 @@ export function Dashboard() {
   const [data, setData] = useState({})
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(true)
-  const [guideData, setGuideData] = useState({ loading: true, errors: {}, ranking: null, leaders: [], programs: [] })
+  const [guideData, setGuideData] = useState({ loading: true, errors: {}, ranking: null, contestRanking: null, leaders: [], programs: [], applications: [] })
+  const [supportForms, setSupportForms] = useState({})
+  const [applicationInfoForms, setApplicationInfoForms] = useState({})
+  const [supportBusy, setSupportBusy] = useState('')
+  const [supportError, setSupportError] = useState('')
+  const guideStorageKey = `apexstratos.student-guide.dismissed.${user?.id || user?.username || 'student'}`
+  const [guideVisible, setGuideVisible] = useState(() => {
+    try { return window.localStorage.getItem(guideStorageKey) !== 'true' }
+    catch { return true }
+  })
   const load = () => {
     setLoading(true)
     const requests = [
@@ -95,8 +106,10 @@ export function Dashboard() {
   const loadGuideData = async () => {
     const requests = [
       ['ranking', '/rankings/me/'],
+      ['contestRanking', '/cohorts/contests/leaderboard/me/'],
       ['leaders', '/rankings/global/'],
       ['programs', '/cohorts/support/programs/'],
+      ['applications', '/cohorts/support/applications/'],
     ]
     const results = await Promise.all(requests.map(async ([key, url]) => {
       try { return [key, (await api.get(url)).data, ''] }
@@ -106,14 +119,69 @@ export function Dashboard() {
     setGuideData({
       loading: false,
       ranking: values.ranking,
+      contestRanking: values.contestRanking,
       leaders: unwrapList(values.leaders),
       programs: unwrapList(values.programs),
+      applications: unwrapList(values.applications),
       errors: Object.fromEntries(results.filter(([, , error]) => error).map(([key, , error]) => [key, error])),
     })
   }
   useEffect(() => { loadGuideData() }, [])
+  const submitSupportApplication = async (event, program) => {
+    event.preventDefault()
+    setSupportBusy(program.id)
+    setSupportError('')
+    try {
+      const form = supportForms[program.id] || {}
+      await applyForSupportProgram(program.id, {
+        full_name: form.full_name || data.profile?.full_name || user?.full_name || '',
+        registered_phone_number: form.registered_phone_number || user?.phone_number || '',
+        mpesa_number: form.mpesa_number || '',
+        application_data: form.application_data || {},
+      })
+      setSupportForms((current) => ({ ...current, [program.id]: {} }))
+      await loadGuideData()
+    } catch (error) {
+      setSupportError(getErrorMessage(error))
+    } finally {
+      setSupportBusy('')
+    }
+    const submitApplicationInformation = async (event, application) => {
+      event.preventDefault()
+      setSupportBusy(application.id)
+      setSupportError('')
+      try {
+        const values = applicationInfoForms[application.id] || {}
+        await submitSupportApplicationInformation(application.id, {
+          mpesa_number: values.mpesa_number || application.mpesa_number,
+          application_data: values.application_data || application.application_data || {},
+        })
+        setApplicationInfoForms((current) => ({ ...current, [application.id]: {} }))
+        await loadGuideData()
+      } catch (error) {
+        setSupportError(getErrorMessage(error))
+      } finally {
+        setSupportBusy('')
+      }
+    }
+  }
+  const dismissGuide = () => {
+    setGuideVisible(false)
+    try { window.localStorage.setItem(guideStorageKey, 'true') }
+    catch { /* The guide remains dismissible for this page view. */ }
+  }
+  const reopenGuide = () => {
+    setGuideVisible(true)
+    try { window.localStorage.removeItem(guideStorageKey) }
+    catch { /* The guide remains visible for this page view. */ }
+  }
   const firstName = data.profile?.full_name?.split(' ')[0] || user?.username || 'there'
   return <Page eyebrow="YOUR LEARNING SPACE" title={`Welcome, ${firstName}.`} description="A clear view of your learning, verified progress, and next steps on ApexStratos.">
+    <section className="support-programme-section" aria-label="Welcome to ApexStratos">
+      <div className="eyebrow">WELCOME TO APEXSTRATOS</div>
+      <h2>Welcome to ApexStratos — Prove what you can do. Build merit. Unlock opportunity.</h2>
+      <p>ApexStratos helps you develop practical capability, demonstrate your performance, build verified merit and discover potential rewards, sponsorships and other opportunities. Payments or purchases never buy merit or guarantee an award.</p>
+    </section>
     <div className="dashboard-highlight"><div><div className="eyebrow">KEEP MOVING FORWARD</div><h2>Small steps add up.</h2><p>Explore a tutorial, update your profile, or see what opportunities are open.</p><Link to="/study" className="button button-primary">Find your next lesson <span>↗</span></Link></div><div className="highlight-orbit" aria-hidden="true"><div /><span>01</span></div></div>
     <div className="section-heading compact"><h2>Your snapshot</h2><button className="text-button" onClick={load}>↻ Refresh</button></div>
     <div className="metric-grid">{[
@@ -124,23 +192,24 @@ export function Dashboard() {
     ].map(([label, value, caption, key, to]) => <Link to={to} key={label} className="metric-card"><span className="metric-label">{label}</span>{loading ? <span className="metric-value metric-loading">···</span> : errors[key] ? <span className="metric-value metric-unavailable">Unavailable</span> : <strong className="metric-value">{value ?? '—'}</strong>}<span className="metric-caption">{caption}</span><span className="metric-arrow">↗</span></Link>)}</div>
     <div className="dashboard-bottom"><div className="panel"><div className="panel-heading"><h2>Pick a direction</h2><Link to="/study">All disciplines →</Link></div><div className="quick-links"><Link to="/tutorials"><span>▷</span><strong>Browse tutorials</strong><small>Learning content available on Apex</small><b>→</b></Link><Link to="/mentorship"><span>◎</span><strong>Meet mentors</strong><small>Explore mentors listed on Apex</small><b>→</b></Link><Link to="/opportunities"><span>⌁</span><strong>Find opportunities</strong><small>See open roles from the platform</small><b>→</b></Link></div></div><div className="panel profile-panel"><div className="eyebrow">YOUR PROFILE</div><h2>Show what you can do.</h2><p>Keep your skills and experience current so people can understand your work.</p><Link to="/profile" className="text-link">Review your profile <span>→</span></Link></div></div>
     {user?.role !== 'vendor' && <section className="support-programme-section" aria-labelledby="student-guide-title">
-      <div className="section-heading compact"><div><div className="eyebrow">YOUR STUDENT GUIDE</div><h2 id="student-guide-title">A simple path forward</h2></div></div>
-      <ol className="steps-grid">
+      <div className="section-heading compact"><div><div className="eyebrow">YOUR STUDENT GUIDE</div><h2 id="student-guide-title">A simple path forward</h2></div>{guideVisible ? <button className="text-button" onClick={dismissGuide}>Dismiss guide</button> : <button className="text-button" onClick={reopenGuide}>Show your steps</button>}</div>
+      {guideVisible && <ol className="steps-grid">
         <li className="step-card"><span>01</span><h3>Choose a study area</h3><p>Pick the area that best matches what you want to learn.</p><Link className="text-link" to="/study">Choose a study area →</Link></li>
         <li className="step-card"><span>02</span><h3>Learn with free Tutorials</h3><p>Tutorials are scheduled Monday through Thursday.</p><Link className="text-link" to="/tutorials">Browse Tutorials →</Link></li>
-        <li className="step-card"><span>03</span><h3>Explore Sponsored View</h3><p>Sponsored View is scheduled Monday through Thursday.</p><Link className="text-link" to="/sponsored-view">Open Sponsored View →</Link></li>
-        <li className="step-card"><span>04</span><h3>Take the Main Contest</h3><p>The Main Contest is scheduled Friday through Sunday.</p><Link className="text-link" to="/contests">View Main Contest →</Link></li>
-        <li className="step-card"><span>05</span><h3>Review verified merit</h3><p>{guideData.errors.ranking ? 'Your ranking is currently unavailable.' : guideData.ranking ? `Your published global rank is #${guideData.ranking.global_rank}.` : 'No personal ranking record is currently available.'}</p><Link className="text-link" to="/merit">Merit and leaderboard →</Link>
+        <li className="step-card"><span>03</span><h3>Explore Sponsored View</h3><p>Available Monday–Thursday at KSh 20 per attempt, with up to five attempts per day.</p><Link className="text-link" to="/sponsored-view">Open Sponsored View →</Link></li>
+        <li className="step-card"><span>04</span><h3>Take the Main Contest</h3><p>Available Friday–Sunday after the applicable KSh 100 payment is verified.</p><Link className="text-link" to="/contests">View Main Contest →</Link></li>
+        <li className="step-card"><span>05</span><h3>Review verified merit</h3><p>{guideData.errors.ranking ? 'Your merit ranking is currently unavailable.' : guideData.ranking ? `Your published global merit rank is #${guideData.ranking.global_rank}.` : 'No personal merit ranking record is currently available.'}</p>{guideData.errors.contestRanking ? <p role="status">Contest-cycle rank unavailable: {guideData.errors.contestRanking}</p> : guideData.contestRanking?.rank ? <p>Main Contest cycle: rank #{guideData.contestRanking.rank} of {guideData.contestRanking.participant_count} in {guideData.contestRanking.field}, average {guideData.contestRanking.average_score}%. Cycle {new Date(guideData.contestRanking.cycle_start).toLocaleDateString()}–{new Date(guideData.contestRanking.cycle_end).toLocaleDateString()} EAT.</p> : <p>{guideData.contestRanking?.ranking_method ? 'No verified Main Contest result is recorded for your cycle rank yet.' : ''}</p>}<Link className="text-link" to="/merit">Merit and leaderboard →</Link>
           {guideData.errors.leaders ? <p role="status">Leaderboard unavailable: {guideData.errors.leaders}</p> : guideData.leaders.length > 0 && <p>Current published leaderboard: {guideData.leaders.slice(0, 3).map((leader) => `${leader.full_name || 'Apex member'} (#${leader.global_rank})`).join(', ')}.</p>}
         </li>
         <li className="step-card"><span>06</span><h3>Check qualifying opportunities &amp; support</h3><p>See published programmes, your actual merit eligibility, and the reason for each result in the section below.</p><Link className="text-link" to="/opportunities">Open opportunities and support →</Link></li>
         <li className="step-card"><span>07</span><h3>Apply and track status</h3><p>Eligible students can submit the private application and payment-details form. Review decisions and payment status are tracked there; applying does not guarantee funding.</p><Link className="text-link" to="/opportunities">Open application and status tracking →</Link></li>
-      </ol>
+      </ol>}
     </section>}
     {user?.role !== 'vendor' && <section className="support-programme-section" aria-labelledby="dashboard-opportunities-title">
       <div className="section-heading compact"><div><div className="eyebrow">PUBLISHED PROGRAMMES</div><h2 id="dashboard-opportunities-title">Opportunities &amp; Support</h2></div><Link className="text-link" to="/opportunities">Applications and status tracking →</Link></div>
-      {guideData.loading ? <p>Checking published programmes and your current eligibility…</p> : guideData.errors.programs ? <p role="status">Eligibility information is unavailable: {guideData.errors.programs}</p> : guideData.programs.length === 0 ? <p>Your opportunities will appear here as you participate, build verified merit and meet published eligibility requirements. No support programmes are currently published.</p> : <div className="support-programme-list">{guideData.programs.map((program) => {
+      {guideData.loading ? <p>Checking published programmes and your current eligibility…</p> : guideData.errors.programs ? <p role="status">Eligibility information is unavailable: {guideData.errors.programs}</p> : guideData.programs.length === 0 ? <p>Your opportunities will appear here as you participate, build verified merit and meet published eligibility requirements. Start by choosing a study area and completing your first eligible assessment. No support programmes are currently published.</p> : <div className="support-programme-list">{guideData.programs.map((program) => {
         const application = program.application
+        const form = supportForms[program.id] || {}
         const reason = application
           ? `Application status: ${application.status.replaceAll('_', ' ')}.`
           : program.eligible
@@ -150,9 +219,33 @@ export function Dashboard() {
           <div className="tutorial-card-top"><h3>{program.title}</h3><span className={`contest-status status-${application?.status || (program.eligible ? 'eligible' : 'pending')}`}>{application?.status?.replaceAll('_', ' ') || (program.eligible ? 'Eligible to apply' : 'Not yet eligible')}</span></div>
           <p>{program.description}</p>
           <p>{reason}</p>
+          <div className="support-programme-facts"><span>Published criterion: {program.metric_label ? `${program.metric_label} ≥ ${program.merit_cutoff}` : 'Eligibility rules need administrator configuration'}</span><span>{program.metric_label || 'Verified result'}: {program.merit_score} ({program.completed_requirements} qualifying records)</span><span>Funding: {program.funding_status.replaceAll('_', ' ')}</span>{program.deadline && <span>Deadline: {new Date(program.deadline).toLocaleString()}</span>}</div>
           <p className="support-eligibility-rules"><strong>Published eligibility rules:</strong> {program.eligibility_rules}</p>
+          {application ? <div className="support-application-status"><strong>Application status: {application.status.replaceAll('_', ' ')}</strong>{application.admin_reason && <p>{application.admin_reason}</p>}{application.payment_confirmed_at && application.status === 'paid' && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}</div> : program.eligible && program.funding_status !== 'closed' && <form className="support-application-form" onSubmit={(event) => submitSupportApplication(event, program)}>
+            <h3>Apply for this programme</h3><p>Submitting the form requests review. Eligibility is not a guarantee of selection, funding or payment.</p>
+            <label>Registered full name<input required maxLength={200} autoComplete="name" value={form.full_name ?? data.profile?.full_name ?? user?.full_name ?? ''} onChange={(event) => setSupportForms((current) => ({ ...current, [program.id]: { ...current[program.id], full_name: event.target.value } }))} /></label>
+            <label>Registered phone number<input required maxLength={20} autoComplete="tel" value={form.registered_phone_number ?? user?.phone_number ?? ''} onChange={(event) => setSupportForms((current) => ({ ...current, [program.id]: { ...current[program.id], registered_phone_number: event.target.value } }))} /></label>
+            <label>M-Pesa payment number<input required maxLength={20} autoComplete="tel" value={form.mpesa_number || ''} onChange={(event) => setSupportForms((current) => ({ ...current, [program.id]: { ...current[program.id], mpesa_number: event.target.value } }))} /></label>
+            <SupportApplicationFields
+              fields={program.application_fields}
+              values={form.application_data || {}}
+              onChange={(key, value) => setSupportForms((current) => ({
+                ...current,
+                [program.id]: {
+                  ...current[program.id],
+                  application_data: { ...current[program.id]?.application_data, [key]: value },
+                },
+              }))}
+            />
+            {supportError && <div className="alert alert-error" role="alert">{supportError}</div>}
+            <button className="button button-primary" disabled={supportBusy === program.id}>{supportBusy === program.id ? 'Submitting…' : 'Submit application'}</button>
+          </form>}
         </article>
       })}</div>}
+      {!guideData.loading && !guideData.errors.applications && guideData.applications.length > 0 && <div className="support-applications-section"><h3>Your application and payment status</h3><div className="support-application-list">{guideData.applications.map((application) => {
+        const values = applicationInfoForms[application.id] || {}
+        return <article className="support-application-status" key={application.id}><strong>{application.program_title}</strong><span>{application.status.replaceAll('_', ' ')}</span><small>Submitted {new Date(application.submitted_at).toLocaleString()}</small>{application.admin_reason && <p>{application.admin_reason}</p>}{application.application_fields_at_application?.map((field) => application.application_data?.[field.key] && <p key={field.key}><strong>{field.label}:</strong> {application.application_data[field.key]}</p>)}{application.status === 'paid' && application.payment_confirmed_at && <p>Payment confirmed {new Date(application.payment_confirmed_at).toLocaleString()}</p>}{application.status === 'awaiting_information' && <form className="support-application-form" onSubmit={(event) => submitApplicationInformation(event, application)}><label>M-Pesa payment number<input required maxLength={20} autoComplete="tel" value={values.mpesa_number ?? application.mpesa_number} onChange={(event) => setApplicationInfoForms((current) => ({ ...current, [application.id]: { ...current[application.id], mpesa_number: event.target.value } }))} /></label><SupportApplicationFields fields={application.application_fields_at_application} values={values.application_data ?? application.application_data ?? {}} onChange={(key, value) => setApplicationInfoForms((current) => ({ ...current, [application.id]: { ...current[application.id], application_data: { ...current[application.id]?.application_data, [key]: value } } }))} />{supportError && <div className="alert alert-error" role="alert">{supportError}</div>}<button className="button button-primary" disabled={supportBusy === application.id}>{supportBusy === application.id ? 'Submitting…' : 'Submit requested information'}</button></form>}<ol>{(application.events || []).map((event, index) => <li key={`${event.status}-${event.created_at}-${index}`}>{event.status.replaceAll('_', ' ')} · {new Date(event.created_at).toLocaleString()}{event.reason && ` — ${event.reason}`}</li>)}</ol></article>
+      })}</div></div>}
     </section>}
     {loading && <div className="visually-hidden"><Loading /></div>}
   </Page>

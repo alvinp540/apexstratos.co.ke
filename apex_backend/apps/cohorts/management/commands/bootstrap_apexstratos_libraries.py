@@ -1,4 +1,5 @@
 import json
+import uuid
 from pathlib import Path
 from io import StringIO
 
@@ -6,8 +7,15 @@ from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 
 from apps.cohorts.management.commands.import_apexstratos_assessments import _validate_pack
+from apps.cohorts.content_validation import (
+    contest_is_complete,
+    sponsored_view_is_complete,
+    tutorial_is_complete,
+)
+from apps.cohorts.models import AssessmentSchedule, SponsoredViewAssessment, Tutorial
 from apps.cohorts.tutorial_schedule import (
     CAPABILITY_FIELDS,
     EXPECTED_INITIAL_MAIN_CONTEST_ASSESSMENTS,
@@ -26,6 +34,15 @@ LIBRARY_TOTALS = {
     'sponsored-view': EXPECTED_INITIAL_SPONSORED_ASSESSMENTS,
     'main-contest': EXPECTED_INITIAL_MAIN_CONTEST_ASSESSMENTS,
 }
+NAMESPACE = uuid.UUID('ac0b702e-b758-4c29-a101-268ba66ad8db')
+MODEL_BY_LIBRARY = {
+    'tutorials': Tutorial,
+    'sponsored-view': SponsoredViewAssessment,
+    'main-contest': AssessmentSchedule,
+}
+SENSITIVE_FIELDS = {'Medical and Health', 'Law and Society'}
+
+
 class Command(BaseCommand):
     help = 'Validate or append the complete bundled ApexStratos assessment libraries.'
 
@@ -35,7 +52,15 @@ class Command(BaseCommand):
             action='store_true',
             help='Append validated records to the database. Omit for a no-write dry run.',
         )
+        parser.add_argument(
+            '--publish',
+            action='store_true',
+            help='Publish validated content for eight fields; Medical and Health / Law and Society stay drafts.',
+        )
+
     def handle(self, *args, **options):
+        if options['publish'] and not options['apply']:
+            raise CommandError('--publish requires --apply.')
         root = Path(settings.BASE_DIR) / 'content_packs' / 'original'
         manifest_path = root / 'manifest.json'
         try:
@@ -71,6 +96,54 @@ class Command(BaseCommand):
                 )
                 output = command_output.getvalue().strip()
                 self.stdout.write(f'{entry["library"]} / {entry["field"]}: {output}')
+                if options['publish'] and entry['field'] not in SENSITIVE_FIELDS:
+                    self._publish_pack(entry, _payload)
+                elif options['publish']:
+                    self.stdout.write(
+                        f'{entry["library"]} / {entry["field"]}: kept as draft pending qualified human review.'
+                    )
+
+    @classmethod
+    def _publish_pack(cls, entry, payload):
+        model = MODEL_BY_LIBRARY[entry['library']]
+        namespace = uuid.uuid5(NAMESPACE, entry['library'])
+        published_at = timezone.now()
+        for item in payload['assessments']:
+            assessment_id = uuid.uuid5(namespace, item['external_id'])
+            assessment = model.objects.get(pk=assessment_id)
+            if assessment.field in SENSITIVE_FIELDS:
+                raise CommandError(
+                    f'{assessment.field} content cannot be published without qualified human review.'
+                )
+            if assessment.status == 'published':
+                if assessment.attempts.exists():
+                    continue
+            elif assessment.status != 'draft':
+                raise CommandError(
+                    f'{assessment.imported_external_id} is {assessment.status}; '
+                    'only validated draft content can be published by this command.'
+                )
+            elif assessment.attempts.exists():
+                raise CommandError(
+                    f'{assessment.imported_external_id} has historical attempts; '
+                    'the command will not change its status.'
+                )
+
+            complete = {
+                'tutorials': tutorial_is_complete,
+                'sponsored-view': sponsored_view_is_complete,
+                'main-contest': contest_is_complete,
+            }[entry['library']](assessment)
+            if not complete:
+                raise CommandError(
+                    f'{assessment.imported_external_id} failed publication completeness validation.'
+                )
+            if entry['library'] == 'tutorials':
+                assessment.validate_for_publication()
+            if assessment.status != 'published':
+                assessment.status = 'published'
+                assessment.published_at = published_at
+                assessment.save(update_fields=('status', 'published_at', 'updated_at'))
 
     @staticmethod
     def _validate_manifest(root, manifest):

@@ -8,7 +8,7 @@
 - Migrations: Django migrations, applied with `python manage.py migrate` only after a production backup and migration review.
 - Existing process declaration: `apex_backend/Procfile` defines Daphne and a Celery worker. It does not establish that Pinnacle/cPanel supports Procfiles, Daphne, Redis or persistent workers.
 - Frontend API: `/api/v1` by default. WebSockets use same-origin `ws:`/`wss:` unless `VITE_WS_BASE_URL` is set.
-- Git remote: `https://github.com/lekishonlincoln-ux/Apex-renewal-.git`. Confirm repository access and the hosting deployment integration before deploying.
+- Recovery repository: `https://github.com/fiddle254/Apex-loading.git`. Confirm the hosting deployment integration before deploying.
 
 ## Local Validation
 

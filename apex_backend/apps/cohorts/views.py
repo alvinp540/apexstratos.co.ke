@@ -314,6 +314,8 @@ class SubmitTutorialAttemptView(APIView):
                 user=request.user,
             )
             if attempt.status == 'graded':
+                from .support_views import sync_support_eligibilities_for_user
+                sync_support_eligibilities_for_user(attempt.user)
                 return Response(_tutorial_attempt_response(attempt, reveal_answers=True))
             if attempt.status != 'in_progress':
                 return Response(
@@ -405,6 +407,8 @@ class SubmitTutorialAttemptView(APIView):
             progress.save(update_fields=(
                 'attempt_count', 'best_score', 'completed_at', 'last_attempt', 'updated_at',
             ))
+            from .support_views import sync_support_eligibilities_for_user
+            sync_support_eligibilities_for_user(attempt.user)
         return Response(_tutorial_attempt_response(attempt, reveal_answers=True))
 
 

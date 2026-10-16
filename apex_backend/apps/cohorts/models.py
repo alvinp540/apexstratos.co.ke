@@ -2,6 +2,8 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 import uuid
+import re
+from math import isfinite
 from apps.accounts.models import User
 from .tutorial_schedule import CAPABILITY_FIELDS
 
@@ -875,6 +877,23 @@ class SupportProgram(models.Model):
     funding_status = models.CharField(max_length=24, choices=FUNDING_CHOICES, default='awaiting_funding')
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft', db_index=True)
     deadline = models.DateTimeField(null=True, blank=True)
+    eligibility_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            'Optional explicit rule: {"source": "sponsored_view_average", '
+            '"minimum_score": 70, "minimum_attempts": 1}. Leave blank to use '
+            'the existing Main Contest rule for opportunity/philanthropic programmes.'
+        ),
+    )
+    application_fields = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            'Optional list of additional applicant fields. Each item needs key and label; '
+            'supports text, textarea, number, date, and select types.'
+        ),
+    )
     created_by = models.ForeignKey(
         User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_support_programs'
     )
@@ -884,6 +903,115 @@ class SupportProgram(models.Model):
     class Meta:
         db_table = 'support_programs'
         ordering = ['deadline', 'title']
+
+    def clean(self):
+        super().clean()
+        if self.eligibility_config:
+            config = self.eligibility_config
+            if not isinstance(config, dict) or set(config) - {
+                'source', 'minimum_score', 'minimum_attempts',
+            }:
+                raise ValidationError({
+                    'eligibility_config': (
+                        'Use source, minimum_score, and optional minimum_attempts only.'
+                    ),
+                })
+            sources = {
+                'main_contest_average',
+                'sponsored_view_average',
+                'tutorial_completed_count',
+            }
+            source = config.get('source')
+            minimum_score = config.get('minimum_score')
+            minimum_attempts = config.get('minimum_attempts', 1)
+            if source not in sources:
+                raise ValidationError({
+                    'eligibility_config': 'Select a supported, verified metric source.',
+                })
+            if (
+                isinstance(minimum_score, bool)
+                or not isinstance(minimum_score, (int, float))
+                or not isfinite(minimum_score)
+                or minimum_score < 0
+                or (source != 'tutorial_completed_count' and minimum_score > 100)
+            ):
+                raise ValidationError({
+                    'eligibility_config': (
+                        'minimum_score must be non-negative and cannot exceed 100 for score metrics.'
+                    ),
+                })
+            if (
+                isinstance(minimum_attempts, bool)
+                or not isinstance(minimum_attempts, int)
+                or minimum_attempts < 1
+            ):
+                raise ValidationError({
+                    'eligibility_config.minimum_attempts': 'Enter a positive integer.',
+                })
+        elif (
+            self.status == 'published'
+            and self.program_type not in {'opportunity', 'philanthropic_support'}
+        ):
+            raise ValidationError({
+                'eligibility_config': (
+                    'Configure an explicit eligibility rule before publishing this programme type.'
+                ),
+            })
+
+        if not isinstance(self.application_fields, list) or len(self.application_fields) > 20:
+            raise ValidationError({
+                'application_fields': 'Provide a list of at most 20 additional application fields.',
+            })
+        keys = set()
+        reserved = {'full_name', 'registered_phone_number', 'mpesa_number'}
+        for index, field in enumerate(self.application_fields):
+            location = f'application_fields item {index + 1}'
+            if not isinstance(field, dict):
+                raise ValidationError({'application_fields': f'{location} must be an object.'})
+            if set(field) - {'key', 'label', 'type', 'required', 'max_length', 'options'}:
+                raise ValidationError({'application_fields': f'{location} has unsupported settings.'})
+            key = field.get('key')
+            label = field.get('label')
+            field_type = field.get('type', 'text')
+            required = field.get('required', True)
+            max_length = field.get('max_length', 500)
+            if (
+                not isinstance(key, str)
+                or not re.fullmatch(r'[a-z][a-z0-9_]{0,39}', key)
+                or key in reserved
+                or key in keys
+            ):
+                raise ValidationError({
+                    'application_fields': f'{location} needs a unique, non-reserved snake_case key.',
+                })
+            if not isinstance(label, str) or not label.strip() or len(label) > 120:
+                raise ValidationError({'application_fields': f'{location} needs a label of 1–120 characters.'})
+            if field_type not in {'text', 'textarea', 'number', 'date', 'select'}:
+                raise ValidationError({'application_fields': f'{location} has an unsupported field type.'})
+            if not isinstance(required, bool):
+                raise ValidationError({'application_fields': f'{location}.required must be true or false.'})
+            if (
+                isinstance(max_length, bool)
+                or not isinstance(max_length, int)
+                or not 1 <= max_length <= 5000
+            ):
+                raise ValidationError({'application_fields': f'{location}.max_length must be 1–5000.'})
+            options = field.get('options', [])
+            if field_type == 'select' and (
+                not isinstance(options, list)
+                or len(options) < 2
+                or len(options) > 50
+                or any(not isinstance(option, str) or not option.strip() for option in options)
+                or len({option.strip().casefold() for option in options}) != len(options)
+            ):
+                raise ValidationError({
+                    'application_fields': f'{location} select fields need 2–50 distinct options.',
+                })
+            if field_type != 'select' and options:
+                raise ValidationError({
+                    'application_fields': f'{location} only select fields can define options.',
+                })
+            keys.add(key)
 
     def __str__(self):
         return self.title
@@ -921,6 +1049,7 @@ class SupportApplication(models.Model):
         ('payment_processing', 'Payment Processing'),
         ('paid', 'Paid'),
         ('declined', 'Declined'),
+        ('awaiting_information', 'Awaiting Information'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -936,6 +1065,8 @@ class SupportApplication(models.Model):
     full_name = models.CharField(max_length=200)
     registered_phone_number = models.CharField(max_length=20)
     mpesa_number = models.CharField(max_length=20)
+    application_fields_at_application = models.JSONField(default=list, blank=True)
+    application_data = models.JSONField(default=dict, blank=True)
     merit_score_at_application = models.FloatField()
     tutorial_consistency_weeks_at_application = models.PositiveSmallIntegerField(default=0)
     status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='submitted', db_index=True)

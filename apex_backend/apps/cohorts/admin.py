@@ -682,6 +682,21 @@ class AssessmentScheduleAttemptAdmin(admin.ModelAdmin):
 	def has_delete_permission(self, request, obj=None):
 		return False
 
+	def save_model(self, request, obj, form, change):
+		previous = None
+		if change:
+			previous = AssessmentScheduleAttempt.objects.get(pk=obj.pk)
+		super().save_model(request, obj, form, change)
+		if previous and (
+			previous.status != obj.status
+			or previous.score != obj.score
+			or previous.is_flagged != obj.is_flagged
+		):
+			from .support_views import sync_support_eligibilities_for_user
+			transaction.on_commit(
+				lambda user=obj.user: sync_support_eligibilities_for_user(user)
+			)
+
 
 @admin.register(SupportProgram)
 class SupportProgramAdmin(admin.ModelAdmin):
@@ -689,6 +704,14 @@ class SupportProgramAdmin(admin.ModelAdmin):
 	list_filter = ('program_type', 'funding_status', 'status')
 	search_fields = ('title', 'description', 'eligibility_rules')
 	readonly_fields = ('created_by', 'created_at', 'updated_at')
+	fieldsets = (
+		('Programme', {'fields': ('title', 'description', 'program_type', 'status', 'deadline')}),
+		('Published eligibility and funding', {'fields': (
+			'eligibility_rules', 'merit_cutoff', 'eligibility_config', 'funding_status',
+		)}),
+		('Application form', {'fields': ('application_fields',)}),
+		('Record', {'fields': ('created_by', 'created_at', 'updated_at')}),
+	)
 
 	def has_module_permission(self, request):
 		return bool(request.user.is_authenticated and request.user.is_admin)
@@ -728,11 +751,12 @@ class SupportApplicationAdminForm(forms.ModelForm):
 		previous = SupportApplication.objects.get(pk=self.instance.pk)
 		next_status = cleaned_data.get('status', previous.status)
 		allowed = {
-			'submitted': {'submitted', 'under_review', 'declined'},
-			'under_review': {'under_review', 'approved', 'awaiting_funding', 'declined'},
+			'submitted': {'submitted', 'under_review', 'awaiting_information', 'declined'},
+			'under_review': {'under_review', 'approved', 'awaiting_funding', 'awaiting_information', 'declined'},
 			'approved': {'approved', 'awaiting_funding', 'payment_processing', 'declined'},
 			'awaiting_funding': {'awaiting_funding', 'payment_processing', 'declined'},
 			'payment_processing': {'payment_processing', 'paid', 'declined'},
+			'awaiting_information': {'awaiting_information', 'under_review', 'declined'},
 			'paid': {'paid'},
 			'declined': {'declined'},
 		}
@@ -766,6 +790,7 @@ class SupportApplicationAdmin(admin.ModelAdmin):
 		'merit_cutoff_at_application', 'full_name', 'registered_phone_number',
 		'mpesa_number', 'merit_score_at_application',
 		'tutorial_consistency_weeks_at_application', 'reviewed_by',
+		'application_fields_at_application', 'application_data',
 		'payment_confirmed_by', 'payment_confirmed_at', 'submitted_at', 'updated_at',
 	)
 	fieldsets = (
@@ -773,6 +798,7 @@ class SupportApplicationAdmin(admin.ModelAdmin):
 			'user', 'program', 'program_title_at_application',
 			'program_type_at_application', 'full_name',
 			'registered_phone_number', 'mpesa_number',
+			'application_fields_at_application', 'application_data',
 		)}),
 		('Eligibility snapshot', {'fields': (
 			'eligibility', 'merit_cutoff_at_application',
@@ -826,6 +852,24 @@ class SupportApplicationAdmin(admin.ModelAdmin):
 				reason=obj.admin_reason,
 				payment_reference=obj.payment_reference,
 			)
+			if obj.status != previous.status:
+				from apps.notifications.utils import send_notification
+				send_notification(
+					user=obj.user,
+					notification_type='opportunity',
+					title='Opportunity application updated',
+					message=(
+						f'{obj.program_title_at_application}: your application is now '
+						f'{obj.status.replace("_", " ")}.'
+						+ (f' {obj.admin_reason}' if obj.admin_reason else '')
+					),
+					action_url='/opportunities',
+					metadata={
+						'application_id': str(obj.id),
+						'program_id': str(obj.program_id),
+						'status': obj.status,
+					},
+				)
 
 
 @admin.register(SupportEligibility)

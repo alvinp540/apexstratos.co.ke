@@ -504,6 +504,8 @@ class SubmitSponsoredViewAttemptView(APIView):
                 user=request.user,
             )
             if attempt.status == 'graded':
+                from .support_views import sync_support_eligibilities_for_user
+                sync_support_eligibilities_for_user(attempt.user)
                 return Response(_attempt_response(attempt))
             if attempt.status != 'in_progress':
                 return Response({'error': 'This assessment attempt is no longer active.'}, status=status.HTTP_409_CONFLICT)
@@ -554,4 +556,6 @@ class SubmitSponsoredViewAttemptView(APIView):
             attempt.status = 'graded'
             attempt.submitted_at = now
             attempt.save(update_fields=('answers', 'score', 'status', 'submitted_at'))
+            from .support_views import sync_support_eligibilities_for_user
+            sync_support_eligibilities_for_user(attempt.user)
         return Response(_attempt_response(attempt))

@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "title": "ApexStratos Capability Starter Pack",
+    "author": "ApexStratos Product Education",
+    "license": "ApexStratos Original",
+    "attribution": "Original learning content prepared for the ApexStratos starter library; not human expert-reviewed.",
+    "reference": "content_packs/original/starter/main-contest.json"
+  },
+  "assessments": [
+    {
+      "external_id": "apex-starter-software-contest-w1-v1",
+      "week": 1,
+      "day": 4,
+      "slot": 1,
+      "field": "Software Development",
+      "title": "Design a credible capability-to-opportunity workflow",
+      "description": "A timed applied case assessment: design and evaluate a trustworthy learner journey from a software capability goal through verified assessment evidence to a transparently governed opportunity.",
+      "difficulty": "integrated",
+      "duration_minutes": 20,
+      "passing_score": 70,
+      "learning_objectives": [
+        "Analyze how assessment design, access controls, and verified results interact in a real product workflow.",
+        "Select privacy-preserving and auditable implementation choices for merit and eligibility.",
+        "Distinguish a qualifying signal from an approved, funded, and paid opportunity."
+      ],
+      "questions": [
+        {
+          "order": 1,
+          "prompt": "A student has finished a Main Contest assessment. The client reports a score of 100%, but the server has not graded the submitted answers. Which event should create the official performance result?",
+          "options": [
+            "The server validates the attempt snapshot, scores the submitted answers against its private answer key, and persists the graded result.",
+            "The client sends its displayed percentage and the server stores it without checking answers.",
+            "An administrator copies the score from a student screenshot.",
+            "The payment processor returns a successful transaction response."
+          ],
+          "correct_answer": "The server validates the attempt snapshot, scores the submitted answers against its private answer key, and persists the graded result.",
+          "rationale": "The client and payment processor are not authorities for assessment performance. The server must grade the recorded answers against the protected key and persist the result as the source of truth."
+        },
+        {
+          "order": 2,
+          "prompt": "A student submits a KSh 100 payment request for a contest. The M-Pesa reference has not been checked against transaction evidence. What is the correct entitlement state?",
+          "options": [
+            "Access is granted because the amount field is correct.",
+            "Access is granted temporarily, and payment verification can be skipped if the student starts quickly.",
+            "The payment remains pending and the assessment remains unavailable until an authorized verification confirms it.",
+            "The student receives contest merit equal to the payment amount."
+          ],
+          "correct_answer": "The payment remains pending and the assessment remains unavailable until an authorized verification confirms it.",
+          "rationale": "Submitting a reference does not prove payment. A verified entitlement requires authorized confirmation and must not be converted into merit."
+        },
+        {
+          "order": 3,
+          "prompt": "Two concurrent requests attempt to start the same student's contest assessment. Which backend behavior best prevents duplicate attempts and timer resets?",
+          "options": [
+            "Create a new attempt for every request and use the latest timer.",
+            "Use a transaction and a uniqueness rule for the student-assessment pair, returning the existing active attempt or rejecting a completed one.",
+            "Trust the browser to disable the start button after its first click.",
+            "Reset the timer whenever the page is refreshed."
+          ],
+          "correct_answer": "Use a transaction and a uniqueness rule for the student-assessment pair, returning the existing active attempt or rejecting a completed one.",
+          "rationale": "A frontend button cannot prevent concurrent or replayed requests. Transactional backend enforcement and a unique student-assessment attempt preserve a single authoritative timer and result."
+        },
+        {
+          "order": 4,
+          "prompt": "An eligibility rule states that students need at least two verified contest results averaging 80% or higher. A student has one verified result at 100%. What should the evaluation report?",
+          "options": [
+            "Eligible, because a perfect score always overrides other requirements.",
+            "Eligible, because one result is enough whenever the average is above the cutoff.",
+            "Ineligible forever, because the student did not meet the rule on the first try.",
+            "Not yet eligible under the published rule; a second verified result is still required."
+          ],
+          "correct_answer": "Not yet eligible under the published rule; a second verified result is still required.",
+          "rationale": "The minimum-attempt requirement is part of the approved rule. The system should explain the missing evidence and allow a later legitimate evaluation rather than silently ignoring the requirement."
+        },
+        {
+          "order": 5,
+          "prompt": "A student meets a published score cutoff for a funded opportunity. What does that status mean before an administrator reviews the application?",
+          "options": [
+            "The student is eligible to apply under the stated rule; approval and payment remain separate decisions.",
+            "The student has been paid because the opportunity is funded.",
+            "The student can edit the opportunity's cutoff to confirm eligibility.",
+            "The system must promise payment immediately to every eligible student."
+          ],
+          "correct_answer": "The student is eligible to apply under the stated rule; approval and payment remain separate decisions.",
+          "rationale": "Eligibility establishes that the student meets published criteria. Application review, funding authorization, and confirmed payment are distinct workflow steps and must not be represented as completed prematurely."
+        },
+        {
+          "order": 6,
+          "prompt": "The Main Contest schedule closes at midnight Monday in East Africa Time. A student's device is set to another time zone. Which clock should decide whether a new attempt may start?",
+          "options": [
+            "The student's browser clock, because it is closest to the user.",
+            "The server's authoritative time evaluated against the published Africa/Nairobi schedule window.",
+            "The timestamp embedded in the assessment title.",
+            "The earliest time reported by any connected client."
+          ],
+          "correct_answer": "The server's authoritative time evaluated against the published Africa/Nairobi schedule window.",
+          "rationale": "Access windows and deadlines are product rules. Using server time in the specified East Africa Time zone avoids client clock manipulation and inconsistent scheduling."
+        },
+        {
+          "order": 7,
+          "prompt": "A contest question was reported as ambiguous after several students completed it. What response best protects both students and the audit trail?",
+          "options": [
+            "Edit the original question in place and silently recalculate every old score.",
+            "Delete the historical attempts and publish a replacement question under the same record.",
+            "Preserve the question version used by each attempt, document an authorized review, and apply any approved remedy consistently.",
+            "Let each student choose whether their original answer should count."
+          ],
+          "correct_answer": "Preserve the question version used by each attempt, document an authorized review, and apply any approved remedy consistently.",
+          "rationale": "Historical attempts must remain explainable. Preserving snapshots and recording a consistent, authorized remedy avoids rewriting evidence or applying arbitrary individual treatment."
+        },
+        {
+          "order": 8,
+          "prompt": "Three students have verified scores of 91%, 91%, and 84% in the same leaderboard cycle. Which ranking treatment is most transparent?",
+          "options": [
+            "Give the first student to pay the highest rank.",
+            "Randomly reorder the tied students without disclosing the method.",
+            "Display unique ranks based on private phone numbers.",
+            "Apply the published tie rule consistently, such as shared rank for equal scores, and show the cycle and metric."
+          ],
+          "correct_answer": "Apply the published tie rule consistently, such as shared rank for equal scores, and show the cycle and metric.",
+          "rationale": "A leaderboard is meaningful only when its metric, cycle, and tie treatment are consistent and visible. Payment order and private identifiers are not valid merit criteria."
+        },
+        {
+          "order": 9,
+          "prompt": "A student dashboard needs to show an opportunity application moving from 'Approved' to 'Paid'. What evidence should authorize the Paid state?",
+          "options": [
+            "A verified payment confirmation recorded by an authorized administrator with an auditable transaction reference.",
+            "The student's eligibility score exceeding the cutoff.",
+            "The student's application submission timestamp.",
+            "An automated message stating that the application is being processed."
+          ],
+          "correct_answer": "A verified payment confirmation recorded by an authorized administrator with an auditable transaction reference.",
+          "rationale": "Approval is not proof of transfer. Paid should be shown only after authorized confirmation and a recorded reference establish that payment actually occurred."
+        },
+        {
+          "order": 10,
+          "prompt": "An engineer proposes exposing all assessment answer keys in the library endpoint so the frontend can show explanations before students start. What is the safest alternative?",
+          "options": [
+            "Expose the keys only to logged-in students and rely on authentication to keep them secret.",
+            "Return only questions and options before submission, grade on the server, then reveal the correct answer and explanation after the attempt is graded.",
+            "Encode the answer keys in base64 before returning them to the browser.",
+            "Include the answer key in a hidden field that the frontend does not render."
+          ],
+          "correct_answer": "Return only questions and options before submission, grade on the server, then reveal the correct answer and explanation after the attempt is graded.",
+          "rationale": "Authenticated browser data is still accessible to the student. The answer key must remain on the server until grading; post-submission explanations can then support learning without compromising the assessment."
+        }
+      ]
+    }
+  ]
+}

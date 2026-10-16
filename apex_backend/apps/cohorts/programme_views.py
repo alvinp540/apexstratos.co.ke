@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -85,6 +86,12 @@ def _attempt_response(attempt):
         int((attempt.deadline_at - now).total_seconds()),
     ) if attempt.deadline_at else 0
     snapshot = attempt.assessment_snapshot
+    answers = {}
+    reasoning = {}
+    for question_id, value in attempt.answers.items():
+        answers[question_id] = value.get('answer', '') if isinstance(value, dict) else value
+        if isinstance(value, dict) and value.get('reasoning'):
+            reasoning[question_id] = value['reasoning']
     questions = [
         {
             'id': question['id'],
@@ -92,15 +99,18 @@ def _attempt_response(attempt):
             'prompt': question['prompt'],
             'options': question['options'],
             'requires_reasoning': question.get('requires_reasoning', False),
+            **(
+                {
+                    'correct_answer': question['correct_answer'],
+                    'rationale': question['rationale'],
+                    'selected_answer': answers.get(question['id']),
+                }
+                if attempt.status == 'graded'
+                else {}
+            ),
         }
         for question in snapshot.get('questions', [])
     ]
-    answers = {}
-    reasoning = {}
-    for question_id, value in attempt.answers.items():
-        answers[question_id] = value.get('answer', '') if isinstance(value, dict) else value
-        if isinstance(value, dict) and value.get('reasoning'):
-            reasoning[question_id] = value['reasoning']
     attempt_status = attempt.status
     if attempt_status == 'in_progress' and attempt.deadline_at and now >= attempt.deadline_at:
         attempt_status = 'timed_out'
@@ -676,6 +686,7 @@ class SubmitContestAssessmentView(APIView):
                     'submitted_at': attempt.submitted_at,
                     'is_flagged': attempt.is_flagged,
                 })
+
             if attempt.status != 'in_progress':
                 return Response(
                     {'error': 'This assessment attempt is no longer active.'},
@@ -756,6 +767,8 @@ class SubmitContestAssessmentView(APIView):
             attempt.save(update_fields=(
                 'answers', 'submitted_at', 'status', 'ip_address', 'score',
             ))
+            from .support_views import sync_support_eligibilities_for_user
+            sync_support_eligibilities_for_user(attempt.user)
 
         return Response({
             'attempt_id': str(attempt.id),
@@ -763,4 +776,80 @@ class SubmitContestAssessmentView(APIView):
             'score': attempt.score,
             'submitted_at': attempt.submitted_at,
             'is_flagged': attempt.is_flagged,
+        })
+
+
+class MyContestCycleLeaderboardView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        attempts = AssessmentScheduleAttempt.objects.filter(
+            user=request.user,
+            status='graded',
+            score__isnull=False,
+            is_flagged=False,
+            submitted_at__isnull=False,
+        ).select_related('assessment').order_by('-submitted_at')
+        latest = attempts.first()
+        if latest is None:
+            return Response({
+                'rank': None,
+                'field': None,
+                'cycle_start': None,
+                'cycle_end': None,
+                'average_score': None,
+                'attempt_count': 0,
+                'participant_count': 0,
+                'ranking_method': (
+                    'Competition rank by average score across verified, unflagged '
+                    'Main Contest attempts in a Friday–Sunday East Africa Time cycle.'
+                ),
+            })
+
+        latest_local_date = latest.submitted_at.astimezone(EAT).date()
+        friday = latest_local_date - timedelta(days=(latest_local_date.weekday() - 4) % 7)
+        cycle_start = timezone.make_aware(datetime.combine(friday, time.min), EAT)
+        cycle_end = cycle_start + timedelta(days=3)
+        cycle_scores = list(
+            AssessmentScheduleAttempt.objects.filter(
+                assessment__field=latest.assessment.field,
+                status='graded',
+                score__isnull=False,
+                is_flagged=False,
+                submitted_at__gte=cycle_start,
+                submitted_at__lt=cycle_end,
+            ).values('user_id').annotate(
+                average_score=Avg('score'),
+                attempt_count=Count('id'),
+            ).order_by('-average_score', 'user_id')
+        )
+        rank = None
+        average_score = None
+        attempt_count = 0
+        previous_score = None
+        previous_rank = None
+        for index, entry in enumerate(cycle_scores, 1):
+            score = round(entry['average_score'], 2)
+            if score != previous_score:
+                previous_rank = index
+            if entry['user_id'] == request.user.id:
+                rank = previous_rank
+                average_score = score
+                attempt_count = entry['attempt_count']
+                break
+            previous_score = score
+
+        return Response({
+            'rank': rank,
+            'field': latest.assessment.field,
+            'cycle_start': cycle_start,
+            'cycle_end': cycle_end,
+            'average_score': average_score,
+            'attempt_count': attempt_count,
+            'participant_count': len(cycle_scores),
+            'ranking_method': (
+                'Competition rank by average score across verified, unflagged '
+                'Main Contest attempts in a Friday–Sunday East Africa Time cycle; '
+                'equal averages share a rank.'
+            ),
         })

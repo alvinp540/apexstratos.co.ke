@@ -22,6 +22,7 @@ export const getMainContestPayments = () => api.get('/cohorts/payments/main-cont
 export const submitMainContestPayment = (payload) => api.post('/cohorts/payments/main-contest/', payload)
 export const getMainContestAssessments = () => api.get('/cohorts/contests/')
 export const getMainContestLibrary = (params = {}) => api.get('/cohorts/contests/library/', { params })
+export const getMyContestCycleLeaderboard = () => api.get('/cohorts/contests/leaderboard/me/')
 export const startMainContestAssessment = (assessmentId) =>
   api.post(`/cohorts/contests/${assessmentId}/start/`)
 export const saveMainContestAttemptAnswers = (attemptId, answers, reasoning = {}) =>
@@ -34,6 +35,8 @@ export const decideMainContestPayment = (paymentId, payload) =>
   api.post(`/cohorts/admin/payments/main-contest/${paymentId}/decision/`, payload)
 export const getSupportPrograms = () => api.get('/cohorts/support/programs/')
 export const getSupportApplications = () => api.get('/cohorts/support/applications/')
+export const submitSupportApplicationInformation = (applicationId, payload) =>
+  api.patch(`/cohorts/support/applications/${applicationId}/information/`, payload)
 export const applyForSupportProgram = (programId, payload) =>
   api.post(`/cohorts/support/programs/${programId}/applications/`, payload)
 export const getAdminSupportApplications = () => api.get('/cohorts/admin/support/applications/')

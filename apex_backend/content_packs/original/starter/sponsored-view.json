@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "title": "ApexStratos Capability Starter Pack",
+    "author": "ApexStratos Product Education",
+    "license": "ApexStratos Original",
+    "attribution": "Original learning content prepared for the ApexStratos starter library; not human expert-reviewed.",
+    "reference": "content_packs/original/starter/sponsored-view.json"
+  },
+  "assessments": [
+    {
+      "external_id": "apex-starter-software-sponsored-w1-v1",
+      "week": 1,
+      "slot": 1,
+      "field": "Software Development",
+      "title": "Practise building fair and trustworthy capability systems",
+      "description": "Apply software design and evidence principles to realistic decisions about assessments, verified access, merit, privacy, and student opportunities.",
+      "difficulty": "developing",
+      "duration_minutes": 20,
+      "learning_objectives": [
+        "Apply published access and attempt rules without bypassing payment verification.",
+        "Distinguish verified capability evidence from payment, participation, and unreviewed signals.",
+        "Design transparent, privacy-conscious opportunity workflows that do not promise awards."
+      ],
+      "questions": [
+        {
+          "order": 1,
+          "prompt": "A product owner asks the team to award merit points whenever a student opens a paid practice assessment. Which design best preserves the difference between access and demonstrated capability?",
+          "options": [
+            "Add points as soon as the payment reference is entered.",
+            "Award merit for opening the assessment, then subtract points for wrong answers.",
+            "Use verified assessment performance under published scoring rules for merit; treat payment only as an access condition.",
+            "Give more merit to students who pay for the largest number of attempts."
+          ],
+          "correct_answer": "Use verified assessment performance under published scoring rules for merit; treat payment only as an access condition.",
+          "rationale": "Payment can control access to a programme but is not evidence of capability. Merit must be grounded in verified performance and rules disclosed to students."
+        },
+        {
+          "order": 2,
+          "prompt": "A payment form accepts a student's M-Pesa reference. The gateway has not confirmed the transaction. What should happen before the assessment becomes startable?",
+          "options": [
+            "The server should keep the request pending until authorized payment evidence is verified.",
+            "The browser should mark the payment verified when the reference has the right number of characters.",
+            "The assessment should unlock immediately and be relocked only if an administrator notices an issue.",
+            "A successful form submission should be treated as proof that funds were received."
+          ],
+          "correct_answer": "The server should keep the request pending until authorized payment evidence is verified.",
+          "rationale": "A submitted reference is a claim, not confirmation of funds. The backend should grant access only after an authorized verification decision and preserve an auditable record."
+        },
+        {
+          "order": 3,
+          "prompt": "A learner has a pending Sponsored View payment and sends a request directly to the assessment-start endpoint. Which response is appropriate?",
+          "options": [
+            "Start the assessment because the payment reference is present.",
+            "Start a shortened assessment while the payment is checked.",
+            "Change the payment status to verified when the start request is received.",
+            "Deny the start until the KSh 20 payment is verified, and return a clear reason."
+          ],
+          "correct_answer": "Deny the start until the KSh 20 payment is verified, and return a clear reason.",
+          "rationale": "Access control must be enforced by the server, not by the frontend or by user-submitted payment details. A pending payment must not create an entitlement."
+        },
+        {
+          "order": 4,
+          "prompt": "An automated job processes Sponsored View payments close to midnight in East Africa Time. Which approach correctly enforces the five-attempt daily limit?",
+          "options": [
+            "Count attempts using whichever time zone the student's browser reports.",
+            "Calculate the EAT calendar-day interval on the server and count qualifying attempts within that interval.",
+            "Reset the limit at an arbitrary UTC hour without converting the activity day.",
+            "Allow a sixth attempt and ask support to remove it later."
+          ],
+          "correct_answer": "Calculate the EAT calendar-day interval on the server and count qualifying attempts within that interval.",
+          "rationale": "The rule is defined by the East Africa Time calendar day. A server-calculated EAT interval avoids client clock manipulation and inconsistent boundary handling."
+        },
+        {
+          "order": 5,
+          "prompt": "A dashboard needs to tell a student their contest rank without disclosing other students' private results. Which response is the best fit?",
+          "options": [
+            "Return every student's name, phone number, and exact score to each learner.",
+            "Show an invented rank until enough students participate.",
+            "Return the requesting student's calculated rank and cohort size, while limiting peer data to what the product intentionally publishes.",
+            "Hide the student's result and show only a generic success animation."
+          ],
+          "correct_answer": "Return the requesting student's calculated rank and cohort size, while limiting peer data to what the product intentionally publishes.",
+          "rationale": "Students need their own standing, but that does not justify exposing other participants' personal data or scores. The API can disclose a calculated rank and aggregate context."
+        },
+        {
+          "order": 6,
+          "prompt": "A support programme has no configured eligibility formula. A student finishes an assessment and asks whether they qualify. What should the platform do?",
+          "options": [
+            "Invent a reasonable-looking cutoff and make an automatic award decision.",
+            "Show that eligibility cannot yet be determined because approved criteria are not configured.",
+            "Treat all students with a passing assessment score as eligible for every programme.",
+            "Use the student's payment amount as a replacement merit formula."
+          ],
+          "correct_answer": "Show that eligibility cannot yet be determined because approved criteria are not configured.",
+          "rationale": "Consequential eligibility decisions require approved, published rules. The system should identify missing configuration rather than inventing a cutoff or substituting payment."
+        },
+        {
+          "order": 7,
+          "prompt": "A content update changes a question after a student has started an assessment. Which implementation best protects a fair attempt?",
+          "options": [
+            "Replace the question in the active attempt and grade the new version.",
+            "Let the student's browser submit an answer key for whichever version it prefers.",
+            "Delete the attempt and tell the student to pay again.",
+            "Keep an immutable question snapshot for the attempt and grade against that recorded version."
+          ],
+          "correct_answer": "Keep an immutable question snapshot for the attempt and grade against that recorded version.",
+          "rationale": "A snapshot makes the assessed content and answer key stable from start through grading. It supports fairness, auditability, and historical record preservation."
+        },
+        {
+          "order": 8,
+          "prompt": "An application needs an M-Pesa payment number and one programme-specific response. Which collection practice is most appropriate?",
+          "options": [
+            "Collect only the payment details and programme information needed, protect them with access controls, and avoid exposing them in public endpoints.",
+            "Request identity documents, contacts, and account passwords in case they are useful later.",
+            "Display submitted payment numbers on a public leaderboard for transparency.",
+            "Store application details in a browser URL so an administrator can retrieve them."
+          ],
+          "correct_answer": "Collect only the payment details and programme information needed, protect them with access controls, and avoid exposing them in public endpoints.",
+          "rationale": "Data minimization reduces privacy risk. Sensitive application and payment details should be limited to necessary fields and accessible only to authorized student and administrative workflows."
+        },
+        {
+          "order": 9,
+          "prompt": "A student submits a support application and sees the status 'Submitted'. No administrator has reviewed it yet. Which dashboard message is accurate?",
+          "options": [
+            "Your award has been approved and will be paid today.",
+            "Your application is recorded and awaiting review; payment is not confirmed.",
+            "Your application was declined because it is not already marked Paid.",
+            "Your leaderboard position guarantees the requested funding."
+          ],
+          "correct_answer": "Your application is recorded and awaiting review; payment is not confirmed.",
+          "rationale": "Submitted is a workflow state, not approval or payment confirmation. Status labels must reflect the actual administrative and funding decisions."
+        },
+        {
+          "order": 10,
+          "prompt": "A student qualifies for both a Sponsored View reward and a philanthropic support programme. How should the backend represent the claims?",
+          "options": [
+            "Merge both into one generic payment record so their eligibility rules cannot differ.",
+            "Treat any qualifying leaderboard placement as proof that both payments were paid.",
+            "Keep distinct programme records with their own eligibility rules, funding state, application, and payment evidence.",
+            "Allow the student to edit both programme statuses from the dashboard."
+          ],
+          "correct_answer": "Keep distinct programme records with their own eligibility rules, funding state, application, and payment evidence.",
+          "rationale": "Different programmes can have different rules, funding, and review processes. Separate records support accurate decisions, traceability, and prevention of duplicate or unsupported payouts."
+        }
+      ]
+    }
+  ]
+}

@@ -13,12 +13,15 @@ from apps.cohorts.models import (
     SupportApplicationEvent,
     SupportEligibility,
     SupportProgram,
+    SponsoredViewAssessment,
+    SponsoredViewAttempt,
+    SponsoredViewPayment,
     Tutorial,
     TutorialProgress,
 )
 from apps.notifications.models import Notification
 from apps.profiles.models import Profile
-from apps.cohorts.support_views import get_support_merit
+from apps.cohorts.support_views import get_support_merit, sync_support_eligibilities_for_user
 
 
 class SupportApplicationTests(TestCase):
@@ -124,6 +127,77 @@ class SupportApplicationTests(TestCase):
         self.assertEqual(notification.action_url, '/opportunities')
         self.assertEqual(notification.metadata['program_id'], str(self.program.id))
 
+    def test_contest_submission_automatically_evaluates_eligibility(self):
+        assessment = AssessmentSchedule.objects.create(
+            month=1,
+            week=1,
+            day=4,
+            assessment_slot=1,
+            field='Software Development',
+            title='Verified contest',
+            description='A scenario-based assessment.',
+            learning_objectives=['Apply verified evidence.'],
+            duration_minutes=20,
+            status='published',
+            scheduled_for=timezone.now() - timedelta(days=1),
+        )
+        questions = [
+            {
+                'id': f'question-{index}',
+                'options': ['A', 'B', 'C', 'D'],
+                'correct_answer': 'A',
+            }
+            for index in range(10)
+        ]
+        attempt = AssessmentScheduleAttempt.objects.create(
+            user=self.student,
+            assessment=assessment,
+            status='in_progress',
+            deadline_at=timezone.now() + timedelta(minutes=20),
+            assessment_snapshot={'questions': questions},
+        )
+
+        response = self.client.post(
+            reverse('contest-assessment-submit', kwargs={'attempt_id': attempt.id}),
+            {'answers': {question['id']: 'A' for question in questions}},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['score'], 100)
+        eligibility = SupportEligibility.objects.get(user=self.student, program=self.program)
+        self.assertTrue(eligibility.eligible)
+        self.assertEqual(eligibility.completed_contests, 1)
+        self.assertEqual(Notification.objects.filter(user=self.student, notification_type='opportunity').count(), 1)
+
+        repeated = self.client.post(
+            reverse('contest-assessment-submit', kwargs={'attempt_id': attempt.id}),
+            {'answers': {question['id']: 'A' for question in questions}},
+            format='json',
+        )
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(Notification.objects.filter(user=self.student, notification_type='opportunity').count(), 1)
+
+    def test_changed_verified_result_revokes_eligibility_and_notifies(self):
+        attempt = self.make_contest_attempt(80)
+        self.client.get(reverse('support-program-list'))
+        eligibility = SupportEligibility.objects.get(user=self.student, program=self.program)
+        self.assertTrue(eligibility.eligible)
+
+        attempt.is_flagged = True
+        attempt.save(update_fields=['is_flagged'])
+        sync_support_eligibilities_for_user(self.student)
+
+        eligibility.refresh_from_db()
+        self.assertFalse(eligibility.eligible)
+        self.assertEqual(
+            Notification.objects.filter(
+                user=self.student,
+                title='Opportunity eligibility changed',
+            ).count(),
+            1,
+        )
+
     def test_sponsored_view_reward_does_not_inherit_main_contest_eligibility(self):
         reward_program = SupportProgram.objects.create(
             title='Sponsored View reward cycle',
@@ -141,7 +215,7 @@ class SupportApplicationTests(TestCase):
             if program['id'] == str(reward_program.id)
         )
         self.assertFalse(reward['eligible'])
-        self.assertIn('own verified eligibility workflow', reward['eligibility_reason'])
+        self.assertIn('configure and publish eligibility criteria', reward['eligibility_reason'])
 
         application = self.client.post(
             reverse('support-application-create', kwargs={'program_id': reward_program.id}),
@@ -154,6 +228,121 @@ class SupportApplicationTests(TestCase):
         )
         self.assertEqual(application.status_code, 403)
         self.assertFalse(SupportApplication.objects.filter(program=reward_program).exists())
+
+    def test_sponsored_view_reward_uses_its_configured_verified_metric_and_form(self):
+        reward_program = SupportProgram.objects.create(
+            title='Sponsored View Practice Reward',
+            description='A separate, rule-configured Sponsored View programme.',
+            program_type='sponsored_view_reward',
+            eligibility_rules='At least 80% from one verified Sponsored View attempt.',
+            merit_cutoff=0,
+            eligibility_config={
+                'source': 'sponsored_view_average',
+                'minimum_score': 80,
+                'minimum_attempts': 1,
+            },
+            application_fields=[{
+                'key': 'support_reason',
+                'label': 'How will this support help?',
+                'type': 'textarea',
+                'required': True,
+                'max_length': 500,
+            }],
+            status='published',
+        )
+        assessment = SponsoredViewAssessment.objects.create(
+            week=1,
+            slot=1,
+            field='Software Development',
+            title='Sponsored assessment',
+            description='A verified practice assessment.',
+            learning_objectives=['Apply the concept.', 'Assess evidence.', 'Explain a decision.'],
+            duration_minutes=20,
+            status='published',
+        )
+        payment = SponsoredViewPayment.objects.create(
+            user=self.student,
+            assessment=assessment,
+            amount_kes=20,
+            payment_reference='SUPPORT-VERIFIED-PAYMENT',
+            status='verified',
+            verified_at=timezone.now(),
+        )
+        question_snapshot = [
+            {
+                'id': f'sponsored-question-{index}',
+                'order': index + 1,
+                'prompt': f'Choose the verified response for case {index + 1}.',
+                'options': ['A', 'B', 'C', 'D'],
+                'correct_answer': 'A',
+                'rationale': 'The selected response matches the verified evidence.',
+                'requires_reasoning': False,
+            }
+            for index in range(10)
+        ]
+        attempt = SponsoredViewAttempt.objects.create(
+            payment=payment,
+            user=self.student,
+            assessment=assessment,
+            question_snapshot=question_snapshot,
+            status='in_progress',
+            deadline_at=timezone.now() + timedelta(minutes=20),
+        )
+
+        submitted = self.client.post(
+            reverse('sponsored-view-attempt-submit', kwargs={'attempt_id': attempt.id}),
+            {
+                'answers': {
+                    question['id']: ('A' if index < 9 else 'B')
+                    for index, question in enumerate(question_snapshot)
+                },
+            },
+            format='json',
+        )
+        self.assertEqual(submitted.status_code, 200)
+        self.assertEqual(submitted.data['score'], 90)
+        self.assertTrue(SupportEligibility.objects.get(user=self.student, program=reward_program).eligible)
+
+        programs = self.client.get(reverse('support-program-list'))
+        reward = next(
+            item for item in programs.data['results']
+            if item['id'] == str(reward_program.id)
+        )
+        self.assertTrue(reward['eligible'])
+        self.assertEqual(reward['eligibility_source'], 'sponsored_view_average')
+        self.assertEqual(reward['merit_score'], 90)
+        self.assertEqual(
+            reward['application_fields'][0]['key'],
+            'support_reason',
+        )
+
+        payload = {
+            'full_name': 'Student One',
+            'registered_phone_number': '0712345678',
+            'mpesa_number': '+254712345678',
+            'application_data': {},
+        }
+        missing_answer = self.client.post(
+            reverse('support-application-create', kwargs={'program_id': reward_program.id}),
+            payload,
+            format='json',
+        )
+        self.assertEqual(missing_answer.status_code, 400)
+        payload['application_data'] = {'support_reason': 'I will use it to buy required learning materials.'}
+        application = self.client.post(
+            reverse('support-application-create', kwargs={'program_id': reward_program.id}),
+            payload,
+            format='json',
+        )
+        self.assertEqual(application.status_code, 201)
+        self.assertEqual(
+            application.data['application_data']['support_reason'],
+            payload['application_data']['support_reason'],
+        )
+        self.assertEqual(
+            application.data['application_fields_at_application'],
+            reward_program.application_fields,
+        )
 
     def test_application_requires_current_registered_identity_and_is_private(self):
         self.make_contest_attempt(80)
@@ -237,8 +426,6 @@ class SupportApplicationTests(TestCase):
             ('under_review', 'Checking submitted details.', ''),
             ('approved', 'Details verified.', ''),
             ('awaiting_funding', 'Approved subject to programme funding.', ''),
-            ('payment_processing', 'Payment instructions issued.', 'MPESA12345'),
-            ('paid', 'Payment confirmed.', 'MPESA12345'),
         ):
             response = self.client.post(
                 reverse('support-application-admin-decision', kwargs={'application_id': application.id}),
@@ -250,6 +437,29 @@ class SupportApplicationTests(TestCase):
                 format='json',
             )
             self.assertEqual(response.status_code, 200, response.data)
+
+        response = self.client.post(
+            reverse('support-application-admin-decision', kwargs={'application_id': application.id}),
+            {'status': 'payment_processing', 'admin_reason': 'Payment instructions issued.'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(
+            reverse('support-application-admin-decision', kwargs={'application_id': application.id}),
+            {'status': 'paid', 'admin_reason': 'Payment confirmation attempted without a reference.'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        response = self.client.post(
+            reverse('support-application-admin-decision', kwargs={'application_id': application.id}),
+            {
+                'status': 'paid',
+                'admin_reason': 'Payment confirmed.',
+                'payment_reference': 'MPESA12345',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
 
         application.refresh_from_db()
         self.assertEqual(application.status, 'paid')
@@ -263,3 +473,108 @@ class SupportApplicationTests(TestCase):
         response = self.client.get(reverse('support-application-admin-list'))
 
         self.assertEqual(response.status_code, 403)
+
+    def test_requested_information_can_be_resubmitted_and_admin_decisions_notify(self):
+        self.make_application()
+        application = SupportApplication.objects.get()
+        administrator = User.objects.create_user(
+            email='information-admin@example.test',
+            username='information-admin',
+            password='temporary-test-only',
+            role='admin',
+            is_staff=True,
+        )
+        self.client.force_authenticate(administrator)
+        response = self.client.post(
+            reverse('support-application-admin-decision', kwargs={'application_id': application.id}),
+            {'status': 'under_review', 'admin_reason': 'Checking the application.'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(
+            reverse('support-application-admin-decision', kwargs={'application_id': application.id}),
+            {'status': 'awaiting_information', 'admin_reason': 'Please confirm your M-Pesa number.'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'awaiting_information')
+        self.assertTrue(Notification.objects.filter(
+            user=self.student,
+            title='Opportunity application updated',
+            message__contains='awaiting information',
+        ).exists())
+
+        other_student = User.objects.create_user(
+            email='another-student@example.test',
+            username='another-student',
+            password='temporary-test-only',
+        )
+        self.client.force_authenticate(other_student)
+        private_update = self.client.patch(
+            reverse('support-application-information', kwargs={'application_id': application.id}),
+            {'mpesa_number': '+254722222222'},
+            format='json',
+        )
+        self.assertEqual(private_update.status_code, 404)
+
+        self.client.force_authenticate(self.student)
+        response = self.client.patch(
+            reverse('support-application-information', kwargs={'application_id': application.id}),
+            {'mpesa_number': '+254722222222'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'submitted')
+        self.assertEqual(response.data['mpesa_number'], '+254722222222')
+        self.assertEqual(response.data['admin_reason'], '')
+        self.assertEqual(SupportApplicationEvent.objects.filter(application=application).count(), 4)
+
+    def test_awaiting_information_can_update_custom_answers_with_validation(self):
+        self.program.application_fields = [{
+            'key': 'support_reason',
+            'label': 'Reason for support',
+            'type': 'textarea',
+            'required': True,
+            'max_length': 300,
+        }]
+        self.program.save(update_fields=['application_fields'])
+        self.make_contest_attempt(80)
+        created = self.client.post(
+            reverse('support-application-create', kwargs={'program_id': self.program.id}),
+            {
+                'full_name': 'Student One',
+                'registered_phone_number': '0712345678',
+                'mpesa_number': '0712345678',
+                'application_data': {'support_reason': 'To continue my learning.'},
+            },
+            format='json',
+        )
+        self.assertEqual(created.status_code, 201)
+        application = SupportApplication.objects.get()
+        application.status = 'awaiting_information'
+        application.save(update_fields=['status'])
+
+        invalid = self.client.patch(
+            reverse('support-application-information', kwargs={'application_id': application.id}),
+            {'application_data': {'support_reason': 'x' * 301}},
+            format='json',
+        )
+        self.assertEqual(invalid.status_code, 400)
+        application.refresh_from_db()
+        self.assertEqual(application.status, 'awaiting_information')
+
+        updated = self.client.patch(
+            reverse('support-application-information', kwargs={'application_id': application.id}),
+            {
+                'application_data': {
+                    'support_reason': 'I need the listed equipment for practical work.',
+                },
+            },
+            format='json',
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data['status'], 'submitted')
+        self.assertEqual(
+            updated.data['application_data']['support_reason'],
+            'I need the listed equipment for practical work.',
+        )

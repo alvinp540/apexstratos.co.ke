@@ -2,16 +2,24 @@ import copy
 import json
 from io import StringIO
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from django.core.management import call_command, CommandError
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIClient
 
+from apps.accounts.models import User
 from apps.cohorts.models import (
     AssessmentSchedule,
     AssessmentScheduleQuestion,
+    ParticipationPayment,
     SponsoredViewAssessment,
+    SponsoredViewPayment,
     SponsoredViewQuestion,
     Tutorial,
     TutorialQuestion,
@@ -280,3 +288,32 @@ class AssessmentImportTests(TestCase):
             '1/720 complete published assessments and 10/7200 complete questions (1 duplicate assessment(s) excluded)',
             stdout.getvalue(),
         )
+
+
+class PublishedAssessmentLibraryIntegrationTests(TestCase):
+    eat = ZoneInfo('Africa/Nairobi')
+
+    def test_seeds_real_starter_assessments_idempotently_without_sensitive_fields(self):
+        seed = 'seed_apexstratos_starter_libraries'
+        call_command(seed, '--apply', stdout=StringIO())
+        call_command(seed, '--apply', stdout=StringIO())
+
+        expected = (
+            (Tutorial, TutorialQuestion, 'tutorial'),
+            (SponsoredViewAssessment, SponsoredViewQuestion, 'assessment'),
+            (AssessmentSchedule, AssessmentScheduleQuestion, 'assessment'),
+        )
+        for assessment_model, question_model, relation in expected:
+            assessment = assessment_model.objects.get(status='published')
+            self.assertEqual(question_model.objects.filter(**{relation: assessment}).count(), 10)
+            self.assertIn('apex-starter-', assessment.imported_external_id)
+            self.assertFalse(
+                assessment_model.objects.filter(
+                    field__in=('Medical and Health', 'Law and Society'),
+                    status='published',
+                ).exists()
+            )
+
+        self.assertEqual(Tutorial.objects.count(), 1)
+        self.assertEqual(SponsoredViewAssessment.objects.count(), 1)
+        self.assertEqual(AssessmentSchedule.objects.count(), 1)

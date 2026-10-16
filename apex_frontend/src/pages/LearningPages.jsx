@@ -5,6 +5,7 @@ import { studyAreas } from '../data'
 import Page from '../components/Page'
 import { Empty, ErrorState, Loading } from '../components/States'
 import WeeklyScheduleNotice from '../components/WeeklyScheduleNotice'
+import SupportApplicationFields from '../components/SupportApplicationFields'
 import { useAuth } from '../context/AuthContext'
 import {
   applyForSupportProgram,
@@ -12,6 +13,7 @@ import {
   getAdminSupportApplications,
   getSupportApplications,
   getSupportPrograms,
+  submitSupportApplicationInformation,
 } from '../api/cohortAPI'
 
 export function StudyAreas() {
@@ -219,6 +221,7 @@ export function Opportunities() {
   const [supportStatus, setSupportStatus] = useState({ loading: true, error: '' })
   const [adminError, setAdminError] = useState('')
   const [forms, setForms] = useState({})
+  const [informationForms, setInformationForms] = useState({})
   const [busyId, setBusyId] = useState('')
   const [formError, setFormError] = useState('')
   const loadJobs = () => {
@@ -266,6 +269,7 @@ export function Opportunities() {
         full_name: form.full_name || '',
         registered_phone_number: form.registered_phone_number || '',
         mpesa_number: form.mpesa_number || '',
+        application_data: form.application_data || {},
       })
       setForms((current) => ({ ...current, [program.id]: {} }))
       await loadSupport()
@@ -287,6 +291,23 @@ export function Opportunities() {
       setBusyId('')
     }
   }
+  const submitRequestedInformation = async (event, application) => {
+    event.preventDefault()
+    setBusyId(application.id)
+    setFormError('')
+    try {
+      const values = informationForms[application.id] || {}
+      await submitSupportApplicationInformation(application.id, {
+        mpesa_number: values.mpesa_number || application.mpesa_number,
+        application_data: values.application_data || application.application_data || {},
+      })
+      await loadSupport()
+    } catch (error) {
+      setFormError(getErrorMessage(error))
+    } finally {
+      setBusyId('')
+    }
+  }
 
   return <Page eyebrow="NEXT STEPS" title="Eligible Opportunities & Support" description="Review published programme rules, apply when eligible, and track every review and payment status. Eligibility does not guarantee funding or payout.">
     <section className="support-programme-section">
@@ -297,20 +318,31 @@ export function Opportunities() {
         return <article className="support-programme-card" key={program.id}>
           <div className="tutorial-card-top"><span className="tag">{program.program_type.replaceAll('_', ' ')}</span><span className={`contest-status status-${application?.status || (program.eligible ? 'eligible' : 'pending')}`}>{application?.status?.replaceAll('_', ' ') || (program.eligible ? 'Eligible to apply' : 'Not yet eligible')}</span></div>
           <h3>{program.title}</h3><p>{program.description}</p>
-          <div className="support-programme-facts"><span>Published merit cutoff: {program.merit_cutoff}%</span><span>Your Main Contest merit: {program.merit_score}% ({program.completed_contests} eligible assessments)</span><span>Tutorial consistency: {program.tutorial_consistency_weeks} of 8 weeks</span><span>Funding: {program.funding_status.replaceAll('_', ' ')}</span>{program.deadline && <span>Deadline: {new Date(program.deadline).toLocaleString()}</span>}</div>
+          <div className="support-programme-facts"><span>Published criterion: {program.metric_label ? `${program.metric_label} ≥ ${program.merit_cutoff}` : 'Eligibility rules need administrator configuration'}</span><span>{program.metric_label || 'Verified result'}: {program.merit_score} ({program.completed_requirements} qualifying records)</span><span>Tutorial consistency: {program.tutorial_consistency_weeks} of 8 weeks</span><span>Funding: {program.funding_status.replaceAll('_', ' ')}</span>{program.deadline && <span>Deadline: {new Date(program.deadline).toLocaleString()}</span>}</div>
           <p className="support-eligibility-rules"><strong>Eligibility rules:</strong> {program.eligibility_rules}</p>
           {application ? <div className="support-application-status"><strong>Application status: {application.status.replaceAll('_', ' ')}</strong>{application.admin_reason && <p>{application.admin_reason}</p>}{application.payment_reference && <p>Payment reference: {application.payment_reference}</p>}{application.payment_confirmed_at && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}</div> : program.eligible && program.funding_status !== 'closed' ? <form className="support-application-form" onSubmit={(event) => submitApplication(event, program)}>
             <h4>Application and payment details</h4><p>Submitting an application requests review; it does not guarantee selection, funding, or payment.</p>
             <label>Registered full name<input required maxLength={200} autoComplete="name" value={form.full_name ?? user?.full_name ?? ''} onChange={(event) => updateForm(program.id, 'full_name', event.target.value)} /></label>
             <label>Registered phone number<input required maxLength={20} autoComplete="tel" value={form.registered_phone_number ?? user?.phone_number ?? ''} onChange={(event) => updateForm(program.id, 'registered_phone_number', event.target.value)} /></label>
             <label>M-Pesa number for this programme<input required maxLength={20} autoComplete="tel" value={form.mpesa_number || ''} onChange={(event) => updateForm(program.id, 'mpesa_number', event.target.value)} /></label>
+            <SupportApplicationFields
+              fields={program.application_fields}
+              values={form.application_data || {}}
+              onChange={(key, value) => updateForm(program.id, 'application_data', {
+                ...form.application_data,
+                [key]: value,
+              })}
+            />
             {formError && <div className="alert alert-error" role="alert">{formError}</div>}
             <button className="button button-primary" type="submit" disabled={busyId === program.id}>{busyId === program.id ? 'Submitting…' : 'Submit application'}</button>
           </form> : <p className="support-not-eligible">{program.eligibility_reason || 'Not currently eligible under the published programme rules.'}</p>}
         </article>
       })}</div>}
     </section>
-    <section className="support-applications-section"><div className="eyebrow">YOUR RECORDS</div><h2>Applications & payment status</h2>{applications.length ? <div className="support-application-list">{applications.map((application) => <article className="support-application-status" key={application.id}><strong>{application.program_title}</strong><span>{application.status.replaceAll('_', ' ')}</span><small>Submitted {new Date(application.submitted_at).toLocaleString()}</small>{application.admin_reason && <p>{application.admin_reason}</p>}{application.payment_reference && <p>Payment reference: {application.payment_reference}</p>}{application.payment_confirmed_at && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}</article>)}</div> : <Empty title="No applications submitted">Eligible forms appear with published programmes above. Your application history will be kept here.</Empty>}</section>
+    <section className="support-applications-section"><div className="eyebrow">YOUR RECORDS</div><h2>Applications & payment status</h2>{applications.length ? <div className="support-application-list">{applications.map((application) => {
+      const values = informationForms[application.id] || {}
+      return <article className="support-application-status" key={application.id}><strong>{application.program_title}</strong><span>{application.status.replaceAll('_', ' ')}</span><small>Submitted {new Date(application.submitted_at).toLocaleString()}</small>{application.admin_reason && <p>{application.admin_reason}</p>}{application.application_fields_at_application?.map((field) => application.application_data?.[field.key] && <p key={field.key}><strong>{field.label}:</strong> {application.application_data[field.key]}</p>)}{application.payment_reference && <p>Payment reference: {application.payment_reference}</p>}{application.status === 'paid' && application.payment_confirmed_at && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}{application.status === 'awaiting_information' && <form className="support-application-form" onSubmit={(event) => submitRequestedInformation(event, application)}><label>Updated M-Pesa number<input required maxLength={20} autoComplete="tel" value={values.mpesa_number ?? application.mpesa_number} onChange={(event) => setInformationForms((current) => ({ ...current, [application.id]: { ...current[application.id], mpesa_number: event.target.value } }))} /></label><SupportApplicationFields fields={application.application_fields_at_application} values={values.application_data ?? application.application_data ?? {}} onChange={(key, value) => setInformationForms((current) => ({ ...current, [application.id]: { ...current[application.id], application_data: { ...current[application.id]?.application_data, [key]: value } } }))} />{formError && <div className="alert alert-error" role="alert">{formError}</div>}<button className="button button-primary" disabled={busyId === application.id}>{busyId === application.id ? 'Submitting…' : 'Submit requested information'}</button></form>}</article>
+    } )}</div> : <Empty title="No applications submitted">Eligible forms appear with published programmes above. Your application history will be kept here.</Empty>}</section>
     {user?.is_admin && <AdminSupportApplications applications={adminApplications} error={adminError} busyId={busyId} onReview={reviewApplication} onRetry={loadSupport} />}
     <section className="support-vendor-opportunities"><div className="eyebrow">SEPARATE PAID-WORK FEATURE</div><h2>Vendor-listed work</h2><p>These vendor job listings are separate from merit awards, philanthropic support, sponsored access, and programme payouts.</p>
       {status.loading ? <Loading label="Loading vendor work…" /> : status.error ? <ErrorState message={status.error} retry={loadJobs} /> : jobs.length === 0 ? <Empty title="No vendor work listed">There are no vendor job listings available to this account right now.</Empty> : <div className="content-grid">{jobs.map((job) => <article key={job.id} className="opportunity-card"><div className="tutorial-card-top"><span className="tag">{job.profession_required}</span><span className="job-status">{job.status}</span></div><h2>{job.title}</h2><p>{job.description}</p><div className="budget">{job.currency || 'KES'} {job.budget_min ?? '—'} – {job.budget_max ?? '—'}</div><div className="tag-row">{(job.skills_required || []).map((skill) => <span key={skill} className="tag">{skill}</span>)}</div><div className="job-details"><span>Minimum merit: {job.min_trust_score ?? 0}</span><span>{job.deadline ? `Deadline ${new Date(job.deadline).toLocaleDateString()}` : 'No deadline listed'}</span></div></article>)}</div>}
@@ -326,11 +358,12 @@ function AdminSupportApplications({ applications, error, busyId, onReview, onRet
 }
 
 const supportTransitions = {
-  submitted: ['under_review', 'declined'],
-  under_review: ['approved', 'awaiting_funding', 'declined'],
+  submitted: ['under_review', 'awaiting_information', 'declined'],
+  under_review: ['approved', 'awaiting_funding', 'awaiting_information', 'declined'],
   approved: ['awaiting_funding', 'payment_processing', 'declined'],
   awaiting_funding: ['payment_processing', 'declined'],
   payment_processing: ['paid', 'declined'],
+  awaiting_information: ['under_review', 'declined'],
 }
 
 function SupportApplicationReview({ application, busy, onReview }) {
@@ -339,7 +372,7 @@ function SupportApplicationReview({ application, busy, onReview }) {
     event.preventDefault()
     onReview(application.id, form)
   }
-  return <article className="admin-support-card"><div className="admin-support-summary"><div><strong>{application.program_title} · {application.full_name}</strong><span>Registered phone: {application.registered_phone_number} · M-Pesa: {application.mpesa_number}</span><small>Merit {application.merit_score_at_application}% · tutorial consistency {application.tutorial_consistency_weeks_at_application}/8 · {application.status.replaceAll('_', ' ')}</small></div></div>
+  return <article className="admin-support-card"><div className="admin-support-summary"><div><strong>{application.program_title} · {application.full_name}</strong><span>Registered phone: {application.registered_phone_number} · M-Pesa: {application.mpesa_number}</span><small>Verified eligibility metric {application.merit_score_at_application} · tutorial consistency {application.tutorial_consistency_weeks_at_application}/8 · {application.status.replaceAll('_', ' ')}</small>{application.application_fields_at_application?.map((field) => application.application_data?.[field.key] && <p key={field.key}><strong>{field.label}:</strong> {application.application_data[field.key]}</p>)}</div></div>
     <form className="admin-review-form" onSubmit={submit}><label>Decision<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}><option value={application.status}>{application.status.replaceAll('_', ' ')}</option>{(supportTransitions[application.status] || []).map((nextStatus) => <option key={nextStatus} value={nextStatus}>{nextStatus.replaceAll('_', ' ')}</option>)}</select></label>
       <label>Payment reference<input value={form.payment_reference} onChange={(event) => setForm({ ...form, payment_reference: event.target.value })} /></label>
       <label>Decision reason<textarea value={form.admin_reason} onChange={(event) => setForm({ ...form, admin_reason: event.target.value })} required={form.status === 'declined'} /></label>
