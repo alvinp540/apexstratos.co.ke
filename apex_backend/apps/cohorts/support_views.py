@@ -22,6 +22,8 @@ from .models import (
     TutorialProgress,
 )
 
+MAIN_CONTEST_MERIT_PROGRAM_TYPES = frozenset({'opportunity', 'philanthropic_support'})
+
 
 class SupportApplicationInputSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=200)
@@ -103,8 +105,10 @@ def sync_support_eligibility(user, program, *, merit_score=None, completed_conte
     if merit_score is None:
         merit_score, completed_contests, tutorial_weeks = get_support_merit(user)
 
+    rules_supported = program.program_type in MAIN_CONTEST_MERIT_PROGRAM_TYPES
     qualifies = (
-        program.funding_status != 'closed'
+        rules_supported
+        and program.funding_status != 'closed'
         and completed_contests > 0
         and merit_score >= program.merit_cutoff
     )
@@ -219,6 +223,23 @@ class SupportProgramListView(APIView):
                 'completed_contests': completed_contests,
                 'tutorial_consistency_weeks': tutorial_weeks,
                 'eligible': eligibility.eligible,
+                'eligibility_reason': (
+                    'Eligible under the published Main Contest merit cutoff.'
+                    if eligibility.eligible
+                    else (
+                        'Funding for this programme is closed.'
+                        if program.funding_status == 'closed'
+                        else (
+                            'This programme type needs its own verified eligibility workflow; no automatic eligibility is currently enabled.'
+                            if program.program_type not in MAIN_CONTEST_MERIT_PROGRAM_TYPES
+                            else (
+                                'No completed, unflagged Main Contest assessments are recorded.'
+                                if completed_contests == 0
+                                else f'Your verified Main Contest average is below the published {program.merit_cutoff}% cutoff.'
+                            )
+                        )
+                    )
+                ),
                 'application': SupportApplicationSerializer(application).data if application else None,
             })
         return Response({'count': len(results), 'results': results})
@@ -278,7 +299,12 @@ class SupportApplicationCreateView(APIView):
                 request.user,
                 program,
             )
-            if not eligibility.eligible or completed_contests == 0 or merit_score < program.merit_cutoff:
+            if (
+                program.program_type not in MAIN_CONTEST_MERIT_PROGRAM_TYPES
+                or not eligibility.eligible
+                or completed_contests == 0
+                or merit_score < program.merit_cutoff
+            ):
                 return Response(
                     {'error': 'This programme is available only to students who meet its published merit cutoff.'},
                     status=status.HTTP_403_FORBIDDEN,

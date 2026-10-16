@@ -112,6 +112,10 @@ class Tutorial(models.Model):
     field = models.CharField(max_length=40, choices=FIELD_CHOICES, db_index=True)
     title = models.CharField(max_length=240)
     description = models.TextField()
+    imported_external_id = models.CharField(max_length=120, blank=True, db_index=True)
+    content_source = models.CharField(max_length=500, blank=True)
+    content_license = models.CharField(max_length=120, blank=True)
+    content_attribution = models.TextField(blank=True)
     learning_objectives = models.JSONField(default=list)
     concept_explanation = models.TextField(blank=True)
     terminology_and_components = models.TextField(blank=True)
@@ -481,6 +485,10 @@ class AssessmentSchedule(models.Model):
     field = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
     title = models.CharField(max_length=240)
     description = models.TextField()
+    imported_external_id = models.CharField(max_length=120, blank=True, db_index=True)
+    content_source = models.CharField(max_length=500, blank=True)
+    content_license = models.CharField(max_length=120, blank=True)
+    content_attribution = models.TextField(blank=True)
     learning_objectives = models.JSONField(default=list)
     video = models.FileField(upload_to='assessments/videos/%Y/%m/', blank=True)
     duration_minutes = models.PositiveSmallIntegerField(default=20)
@@ -567,6 +575,133 @@ class AssessmentScheduleQuestion(models.Model):
 
     def __str__(self):
         return f'{self.assessment.title} / Question {self.order}'
+
+
+class SponsoredViewAssessment(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('published', 'Published'),
+        ('archived', 'Archived'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    week = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(8)])
+    slot = models.PositiveSmallIntegerField(validators=[MinValueValidator(1)])
+    field = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
+    title = models.CharField(max_length=240)
+    description = models.TextField()
+    imported_external_id = models.CharField(max_length=120, blank=True, db_index=True)
+    content_source = models.CharField(max_length=500, blank=True)
+    content_license = models.CharField(max_length=120, blank=True)
+    content_attribution = models.TextField(blank=True)
+    learning_objectives = models.JSONField(default=list)
+    duration_minutes = models.PositiveSmallIntegerField(default=20)
+    difficulty = models.CharField(
+        max_length=16,
+        choices=[('foundation', 'Foundation'), ('developing', 'Developing'), ('integrated', 'Integrated')],
+        default='foundation',
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft', db_index=True)
+    expert_reviewed = models.BooleanField(default=False)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_sponsored_assessments')
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_sponsored_assessments')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'sponsored_view_assessments'
+        ordering = ['week', 'field', 'slot']
+        constraints = [
+            models.UniqueConstraint(fields=['field', 'week', 'slot'], name='unique_sponsored_view_slot'),
+        ]
+
+    def __str__(self):
+        return f'Week {self.week} / {self.field} #{self.slot}: {self.title}'
+
+
+class SponsoredViewQuestion(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    assessment = models.ForeignKey(SponsoredViewAssessment, on_delete=models.CASCADE, related_name='questions')
+    order = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
+    prompt = models.TextField()
+    options = models.JSONField(default=list)
+    correct_answer = models.TextField()
+    rationale = models.TextField()
+    requires_reasoning = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'sponsored_view_questions'
+        ordering = ['order']
+        constraints = [
+            models.UniqueConstraint(fields=['assessment', 'order'], name='unique_sponsored_view_question_order'),
+        ]
+
+
+class SponsoredViewPayment(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending verification'),
+        ('verified', 'Verified'),
+        ('rejected', 'Rejected'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='sponsored_view_payments')
+    assessment = models.ForeignKey(SponsoredViewAssessment, on_delete=models.PROTECT, related_name='payments')
+    amount_kes = models.PositiveSmallIntegerField(default=20)
+    payment_reference = models.CharField(max_length=255)
+    mpesa_transaction_id = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='pending', db_index=True)
+    verification_notes = models.TextField(blank=True)
+    rejection_reason = models.TextField(blank=True)
+    verified_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='verified_sponsored_view_payments')
+    requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'sponsored_view_payments'
+        ordering = ['-requested_at']
+        constraints = [
+            models.UniqueConstraint(fields=['payment_reference'], name='unique_sponsored_view_payment_reference'),
+            models.UniqueConstraint(
+                fields=['mpesa_transaction_id'],
+                condition=~models.Q(mpesa_transaction_id=''),
+                name='unique_sponsored_view_transaction',
+            ),
+            models.CheckConstraint(condition=models.Q(amount_kes=20), name='sponsored_view_price_is_20_kes'),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'status', 'requested_at']),
+            models.Index(fields=['assessment', 'status']),
+        ]
+
+
+class SponsoredViewAttempt(models.Model):
+    STATUS_CHOICES = [
+        ('in_progress', 'In Progress'),
+        ('graded', 'Graded'),
+        ('timed_out', 'Timed Out'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    payment = models.OneToOneField(SponsoredViewPayment, on_delete=models.PROTECT, related_name='attempt')
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='sponsored_view_attempts')
+    assessment = models.ForeignKey(SponsoredViewAssessment, on_delete=models.PROTECT, related_name='attempts')
+    question_snapshot = models.JSONField(default=list)
+    answers = models.JSONField(default=dict)
+    score = models.FloatField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='in_progress', db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    deadline_at = models.DateTimeField()
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sponsored_view_attempts'
+        indexes = [
+            models.Index(fields=['user', 'started_at']),
+            models.Index(fields=['user', 'status']),
+        ]
 
 
 class ParticipationPayment(models.Model):

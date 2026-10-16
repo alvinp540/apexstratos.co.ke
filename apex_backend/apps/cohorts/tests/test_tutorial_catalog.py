@@ -1,5 +1,7 @@
 from datetime import timedelta
+from datetime import datetime
 from io import StringIO
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command, CommandError
@@ -7,6 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from apps.accounts.models import User
 from apps.cohorts.models import Tutorial, TutorialAttempt, TutorialProgress, TutorialQuestion
@@ -58,7 +61,7 @@ class TutorialCatalogTests(TestCase):
                 order=order,
                 question_type='multiple_choice',
                 prompt=f'In this practical situation, what is the best next step? Case {order}.',
-                options=['Inspect the request', 'Ignore the error', 'Repeat blindly'],
+                options=['Inspect the request', 'Ignore the error', 'Repeat blindly', 'Disable validation'],
                 correct_answer='Inspect the request',
                 rationale='The request context identifies the failure boundary.',
             )
@@ -91,11 +94,13 @@ class TutorialCatalogTests(TestCase):
 
     def test_tutorial_attempt_saves_progress_and_preserves_content_for_revision(self):
         tutorial = self.make_tutorial()
-        started = self.client.post(
-            reverse('tutorial-attempt-start', kwargs={'tutorial_id': tutorial.id}),
-            {},
-            format='json',
-        )
+        scheduled_time = datetime(2026, 10, 15, 10, tzinfo=ZoneInfo('Africa/Nairobi'))
+        with patch('apps.cohorts.views.timezone.now', return_value=scheduled_time):
+            started = self.client.post(
+                reverse('tutorial-attempt-start', kwargs={'tutorial_id': tutorial.id}),
+                {},
+                format='json',
+            )
         self.assertEqual(started.status_code, 201)
         self.assertEqual(len(started.data['questions']), 10)
         self.assertNotIn('correct_answer', started.data['questions'][0])
@@ -104,16 +109,17 @@ class TutorialCatalogTests(TestCase):
             question['id']: 'Inspect the request'
             for question in started.data['questions']
         }
-        submitted = self.client.post(
-            reverse('tutorial-attempt-submit', kwargs={'attempt_id': started.data['id']}),
-            {'answers': answers},
-            format='json',
-        )
-        repeated = self.client.post(
-            reverse('tutorial-attempt-submit', kwargs={'attempt_id': started.data['id']}),
-            {'answers': answers},
-            format='json',
-        )
+        with patch('apps.cohorts.views.timezone.now', return_value=scheduled_time + timedelta(minutes=1)):
+            submitted = self.client.post(
+                reverse('tutorial-attempt-submit', kwargs={'attempt_id': started.data['id']}),
+                {'answers': answers},
+                format='json',
+            )
+            repeated = self.client.post(
+                reverse('tutorial-attempt-submit', kwargs={'attempt_id': started.data['id']}),
+                {'answers': answers},
+                format='json',
+            )
 
         self.assertEqual(submitted.status_code, 200)
         self.assertEqual(submitted.data['score'], 100)
@@ -130,24 +136,27 @@ class TutorialCatalogTests(TestCase):
     def test_tutorial_requires_written_reasoning_when_configured(self):
         tutorial = self.make_tutorial()
         tutorial.questions.filter(order=1).update(requires_reasoning=True)
-        started = self.client.post(
-            reverse('tutorial-attempt-start', kwargs={'tutorial_id': tutorial.id}),
-            {},
-            format='json',
-        )
+        scheduled_time = datetime(2026, 10, 15, 10, tzinfo=ZoneInfo('Africa/Nairobi'))
+        with patch('apps.cohorts.views.timezone.now', return_value=scheduled_time):
+            started = self.client.post(
+                reverse('tutorial-attempt-start', kwargs={'tutorial_id': tutorial.id}),
+                {},
+                format='json',
+            )
         answers = {question['id']: 'Inspect the request' for question in started.data['questions']}
         submit_url = reverse('tutorial-attempt-submit', kwargs={'attempt_id': started.data['id']})
 
-        missing_reasoning = self.client.post(
-            submit_url,
-            {'answers': answers},
-            format='json',
-        )
-        submitted = self.client.post(
-            submit_url,
-            {'answers': answers, 'reasoning': {started.data['questions'][0]['id']: 'The request shows the failing boundary.'}},
-            format='json',
-        )
+        with patch('apps.cohorts.views.timezone.now', return_value=scheduled_time + timedelta(minutes=1)):
+            missing_reasoning = self.client.post(
+                submit_url,
+                {'answers': answers},
+                format='json',
+            )
+            submitted = self.client.post(
+                submit_url,
+                {'answers': answers, 'reasoning': {started.data['questions'][0]['id']: 'The request shows the failing boundary.'}},
+                format='json',
+            )
 
         self.assertEqual(missing_reasoning.status_code, 400)
         self.assertEqual(submitted.status_code, 200)

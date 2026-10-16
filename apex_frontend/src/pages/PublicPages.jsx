@@ -72,6 +72,7 @@ export function Dashboard() {
   const [data, setData] = useState({})
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(true)
+  const [guideData, setGuideData] = useState({ loading: true, errors: {}, ranking: null, leaders: [], programs: [] })
   const load = () => {
     setLoading(true)
     const requests = [
@@ -91,6 +92,26 @@ export function Dashboard() {
     }).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
+  const loadGuideData = async () => {
+    const requests = [
+      ['ranking', '/rankings/me/'],
+      ['leaders', '/rankings/global/'],
+      ['programs', '/cohorts/support/programs/'],
+    ]
+    const results = await Promise.all(requests.map(async ([key, url]) => {
+      try { return [key, (await api.get(url)).data, ''] }
+      catch (error) { return [key, null, getErrorMessage(error)] }
+    }))
+    const values = Object.fromEntries(results.map(([key, value]) => [key, value]))
+    setGuideData({
+      loading: false,
+      ranking: values.ranking,
+      leaders: unwrapList(values.leaders),
+      programs: unwrapList(values.programs),
+      errors: Object.fromEntries(results.filter(([, , error]) => error).map(([key, , error]) => [key, error])),
+    })
+  }
+  useEffect(() => { loadGuideData() }, [])
   const firstName = data.profile?.full_name?.split(' ')[0] || user?.username || 'there'
   return <Page eyebrow="YOUR LEARNING SPACE" title={`Welcome, ${firstName}.`} description="A clear view of your learning, verified progress, and next steps on ApexStratos.">
     <div className="dashboard-highlight"><div><div className="eyebrow">KEEP MOVING FORWARD</div><h2>Small steps add up.</h2><p>Explore a tutorial, update your profile, or see what opportunities are open.</p><Link to="/study" className="button button-primary">Find your next lesson <span>↗</span></Link></div><div className="highlight-orbit" aria-hidden="true"><div /><span>01</span></div></div>
@@ -102,6 +123,37 @@ export function Dashboard() {
       ['Learning profile', data.profile?.headline || 'Add a short introduction', 'Your interests and capabilities', 'profile', '/profile'],
     ].map(([label, value, caption, key, to]) => <Link to={to} key={label} className="metric-card"><span className="metric-label">{label}</span>{loading ? <span className="metric-value metric-loading">···</span> : errors[key] ? <span className="metric-value metric-unavailable">Unavailable</span> : <strong className="metric-value">{value ?? '—'}</strong>}<span className="metric-caption">{caption}</span><span className="metric-arrow">↗</span></Link>)}</div>
     <div className="dashboard-bottom"><div className="panel"><div className="panel-heading"><h2>Pick a direction</h2><Link to="/study">All disciplines →</Link></div><div className="quick-links"><Link to="/tutorials"><span>▷</span><strong>Browse tutorials</strong><small>Learning content available on Apex</small><b>→</b></Link><Link to="/mentorship"><span>◎</span><strong>Meet mentors</strong><small>Explore mentors listed on Apex</small><b>→</b></Link><Link to="/opportunities"><span>⌁</span><strong>Find opportunities</strong><small>See open roles from the platform</small><b>→</b></Link></div></div><div className="panel profile-panel"><div className="eyebrow">YOUR PROFILE</div><h2>Show what you can do.</h2><p>Keep your skills and experience current so people can understand your work.</p><Link to="/profile" className="text-link">Review your profile <span>→</span></Link></div></div>
+    {user?.role !== 'vendor' && <section className="support-programme-section" aria-labelledby="student-guide-title">
+      <div className="section-heading compact"><div><div className="eyebrow">YOUR STUDENT GUIDE</div><h2 id="student-guide-title">A simple path forward</h2></div></div>
+      <ol className="steps-grid">
+        <li className="step-card"><span>01</span><h3>Choose a study area</h3><p>Pick the area that best matches what you want to learn.</p><Link className="text-link" to="/study">Choose a study area →</Link></li>
+        <li className="step-card"><span>02</span><h3>Learn with free Tutorials</h3><p>Tutorials are scheduled Monday through Thursday.</p><Link className="text-link" to="/tutorials">Browse Tutorials →</Link></li>
+        <li className="step-card"><span>03</span><h3>Explore Sponsored View</h3><p>Sponsored View is scheduled Monday through Thursday.</p><Link className="text-link" to="/sponsored-view">Open Sponsored View →</Link></li>
+        <li className="step-card"><span>04</span><h3>Take the Main Contest</h3><p>The Main Contest is scheduled Friday through Sunday.</p><Link className="text-link" to="/contests">View Main Contest →</Link></li>
+        <li className="step-card"><span>05</span><h3>Review verified merit</h3><p>{guideData.errors.ranking ? 'Your ranking is currently unavailable.' : guideData.ranking ? `Your published global rank is #${guideData.ranking.global_rank}.` : 'No personal ranking record is currently available.'}</p><Link className="text-link" to="/merit">Merit and leaderboard →</Link>
+          {guideData.errors.leaders ? <p role="status">Leaderboard unavailable: {guideData.errors.leaders}</p> : guideData.leaders.length > 0 && <p>Current published leaderboard: {guideData.leaders.slice(0, 3).map((leader) => `${leader.full_name || 'Apex member'} (#${leader.global_rank})`).join(', ')}.</p>}
+        </li>
+        <li className="step-card"><span>06</span><h3>Check qualifying opportunities &amp; support</h3><p>See published programmes, your actual merit eligibility, and the reason for each result in the section below.</p><Link className="text-link" to="/opportunities">Open opportunities and support →</Link></li>
+        <li className="step-card"><span>07</span><h3>Apply and track status</h3><p>Eligible students can submit the private application and payment-details form. Review decisions and payment status are tracked there; applying does not guarantee funding.</p><Link className="text-link" to="/opportunities">Open application and status tracking →</Link></li>
+      </ol>
+    </section>}
+    {user?.role !== 'vendor' && <section className="support-programme-section" aria-labelledby="dashboard-opportunities-title">
+      <div className="section-heading compact"><div><div className="eyebrow">PUBLISHED PROGRAMMES</div><h2 id="dashboard-opportunities-title">Opportunities &amp; Support</h2></div><Link className="text-link" to="/opportunities">Applications and status tracking →</Link></div>
+      {guideData.loading ? <p>Checking published programmes and your current eligibility…</p> : guideData.errors.programs ? <p role="status">Eligibility information is unavailable: {guideData.errors.programs}</p> : guideData.programs.length === 0 ? <p>Your opportunities will appear here as you participate, build verified merit and meet published eligibility requirements. No support programmes are currently published.</p> : <div className="support-programme-list">{guideData.programs.map((program) => {
+        const application = program.application
+        const reason = application
+          ? `Application status: ${application.status.replaceAll('_', ' ')}.`
+          : program.eligible
+            ? `Eligible to apply: verified Main Contest merit is ${program.merit_score}% against the published ${program.merit_cutoff}% cutoff.`
+            : program.eligibility_reason || `Not currently eligible under the published programme rules: ${program.eligibility_rules}`
+        return <article className="support-programme-card" key={program.id}>
+          <div className="tutorial-card-top"><h3>{program.title}</h3><span className={`contest-status status-${application?.status || (program.eligible ? 'eligible' : 'pending')}`}>{application?.status?.replaceAll('_', ' ') || (program.eligible ? 'Eligible to apply' : 'Not yet eligible')}</span></div>
+          <p>{program.description}</p>
+          <p>{reason}</p>
+          <p className="support-eligibility-rules"><strong>Published eligibility rules:</strong> {program.eligibility_rules}</p>
+        </article>
+      })}</div>}
+    </section>}
     {loading && <div className="visually-hidden"><Loading /></div>}
   </Page>
 }

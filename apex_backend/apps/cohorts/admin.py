@@ -26,9 +26,13 @@ from .models import (
 	SupportEligibility,
 	SupportApplication,
 	SupportApplicationEvent,
+	SponsoredViewAssessment,
+	SponsoredViewQuestion,
+	SponsoredViewPayment,
 )
 from .allocation import allocate_cohort_rewards
 from .support_views import reconcile_support_program
+from .sponsored_views import _assessment_ready as _sponsored_assessment_ready
 
 
 class TutorialQuestionInline(admin.TabularInline):
@@ -51,7 +55,8 @@ class TutorialAdmin(admin.ModelAdmin):
 	fieldsets = (
 		('Schedule', {'fields': ('month', 'week', 'day', 'daily_slot', 'field', 'scheduled_for')}),
 		('Teaching content', {'fields': (
-			'title', 'description', 'learning_objectives', 'concept_explanation',
+			'title', 'description', 'imported_external_id', 'content_source',
+			'content_license', 'content_attribution', 'learning_objectives', 'concept_explanation',
 			'terminology_and_components', 'why_it_matters', 'how_it_works',
 			'worked_examples', 'common_mistakes', 'practical_application',
 			'decisions_and_tradeoffs', 'related_concepts', 'difficulty',
@@ -357,7 +362,8 @@ class AssessmentScheduleAdmin(admin.ModelAdmin):
 	fieldsets = (
 		('Schedule', {'fields': ('month', 'week', 'day', 'assessment_slot', 'field', 'scheduled_for')}),
 		('Content', {'fields': (
-			'title', 'description', 'learning_objectives', 'difficulty',
+			'title', 'description', 'imported_external_id', 'content_source',
+			'content_license', 'content_attribution', 'learning_objectives', 'difficulty',
 			'duration_minutes', 'passing_score',
 		)}),
 		('Review and publication', {'fields': ('status', 'expert_reviewed', 'review_notes', 'created_by', 'reviewed_by', 'published_at')}),
@@ -382,6 +388,115 @@ class AssessmentScheduleAdmin(admin.ModelAdmin):
 		return self.has_module_permission(request) and not (
 			obj is not None and obj.attempts.exists()
 		)
+
+
+class SponsoredViewQuestionInline(admin.TabularInline):
+	model = SponsoredViewQuestion
+	extra = 10
+	max_num = 10
+	fields = ('order', 'prompt', 'options', 'correct_answer', 'rationale', 'requires_reasoning')
+	ordering = ('order',)
+
+
+@admin.register(SponsoredViewAssessment)
+class SponsoredViewAssessmentAdmin(admin.ModelAdmin):
+	list_display = ('title', 'field', 'week', 'slot', 'status', 'published_at')
+	list_filter = ('status', 'field', 'week', 'difficulty')
+	search_fields = ('title', 'description', 'field', 'imported_external_id')
+	readonly_fields = (
+		'status', 'created_by', 'reviewed_by', 'created_at', 'updated_at',
+		'published_at', 'imported_external_id', 'content_source',
+		'content_license', 'content_attribution',
+	)
+	inlines = (SponsoredViewQuestionInline,)
+	actions = ('publish_content', 'archive_content')
+	fields = (
+		'week', 'slot', 'field', 'title', 'description', 'learning_objectives',
+		'duration_minutes', 'difficulty', 'expert_reviewed', 'imported_external_id',
+		'content_source', 'content_license', 'content_attribution', 'status',
+		'created_by', 'reviewed_by', 'created_at', 'updated_at', 'published_at',
+	)
+
+	def has_module_permission(self, request):
+		return bool(request.user.is_authenticated and request.user.is_admin)
+
+	def has_view_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_add_permission(self, request):
+		return self.has_module_permission(request)
+
+	def has_change_permission(self, request, obj=None):
+		return self.has_module_permission(request) and not (
+			obj is not None and obj.attempts.exists()
+		)
+
+	def has_delete_permission(self, request, obj=None):
+		return self.has_module_permission(request) and not (
+			obj is not None and obj.attempts.exists()
+		)
+
+	def save_model(self, request, obj, form, change):
+		if change:
+			obj.status = 'draft'
+			obj.published_at = None
+		else:
+			obj.created_by = request.user
+		super().save_model(request, obj, form, change)
+
+	@admin.action(description='Publish selected validated Sponsored View assessments')
+	def publish_content(self, request, queryset):
+		changed = 0
+		for assessment in queryset:
+			if assessment.status != 'draft':
+				self.message_user(request, f'{assessment.title}: only draft content can be published.', level=messages.ERROR)
+				continue
+			if not _sponsored_assessment_ready(assessment):
+				self.message_user(request, f'{assessment.title}: requires ten complete four-option questions with explanations and three learning objectives.', level=messages.ERROR)
+				continue
+			assessment.status = 'published'
+			assessment.reviewed_by = request.user
+			assessment.published_at = timezone.now()
+			assessment.save(update_fields=('status', 'reviewed_by', 'published_at', 'updated_at'))
+			changed += 1
+		if changed:
+			self.message_user(request, f'{changed} Sponsored View assessment(s) published.')
+
+	@admin.action(description='Archive selected Sponsored View assessments')
+	def archive_content(self, request, queryset):
+		changed = 0
+		for assessment in queryset:
+			if assessment.status != 'published':
+				self.message_user(request, f'{assessment.title}: only published content can be archived.', level=messages.ERROR)
+				continue
+			assessment.status = 'archived'
+			assessment.save(update_fields=('status', 'updated_at'))
+			changed += 1
+		if changed:
+			self.message_user(request, f'{changed} Sponsored View assessment(s) archived.')
+
+
+@admin.register(SponsoredViewPayment)
+class SponsoredViewPaymentAdmin(admin.ModelAdmin):
+	list_display = ('payment_reference', 'user', 'assessment', 'amount_kes', 'status', 'requested_at', 'verified_at')
+	list_filter = ('status', 'requested_at')
+	search_fields = ('payment_reference', 'mpesa_transaction_id', 'user__email', 'assessment__title')
+	readonly_fields = tuple(field.name for field in SponsoredViewPayment._meta.fields)
+
+	def has_module_permission(self, request):
+		return bool(request.user.is_authenticated and request.user.is_admin)
+
+	def has_view_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_add_permission(self, request):
+		return False
+
+	def has_change_permission(self, request, obj=None):
+		return False
+
+	def has_delete_permission(self, request, obj=None):
+		return False
 
 	def save_model(self, request, obj, form, change):
 		if not change and not obj.created_by_id:

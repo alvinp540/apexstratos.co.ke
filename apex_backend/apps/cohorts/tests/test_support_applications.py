@@ -124,6 +124,37 @@ class SupportApplicationTests(TestCase):
         self.assertEqual(notification.action_url, '/opportunities')
         self.assertEqual(notification.metadata['program_id'], str(self.program.id))
 
+    def test_sponsored_view_reward_does_not_inherit_main_contest_eligibility(self):
+        reward_program = SupportProgram.objects.create(
+            title='Sponsored View reward cycle',
+            description='A separate Sponsored View reward programme.',
+            program_type='sponsored_view_reward',
+            eligibility_rules='Separate reward-cycle rules are required.',
+            merit_cutoff=0,
+            status='published',
+        )
+        self.make_contest_attempt(100)
+
+        response = self.client.get(reverse('support-program-list'))
+        reward = next(
+            program for program in response.data['results']
+            if program['id'] == str(reward_program.id)
+        )
+        self.assertFalse(reward['eligible'])
+        self.assertIn('own verified eligibility workflow', reward['eligibility_reason'])
+
+        application = self.client.post(
+            reverse('support-application-create', kwargs={'program_id': reward_program.id}),
+            {
+                'full_name': 'Student One',
+                'registered_phone_number': '0712345678',
+                'mpesa_number': '0712345678',
+            },
+            format='json',
+        )
+        self.assertEqual(application.status_code, 403)
+        self.assertFalse(SupportApplication.objects.filter(program=reward_program).exists())
+
     def test_application_requires_current_registered_identity_and_is_private(self):
         self.make_contest_attempt(80)
         wrong_identity = self.client.post(

@@ -10,7 +10,7 @@ ACTIVITY_WEEKDAYS = {
     'sponsored_view': frozenset((0, 1, 2, 3)),
     'main_contest': frozenset((4, 5, 6)),
 }
-IMPLEMENTED_ACTIVITIES = frozenset(('tutorials', 'main_contest'))
+IMPLEMENTED_ACTIVITIES = frozenset(('tutorials', 'sponsored_view', 'main_contest'))
 
 
 def activity_window(activity, value=None):

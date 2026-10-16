@@ -306,7 +306,7 @@ export function Opportunities() {
             <label>M-Pesa number for this programme<input required maxLength={20} autoComplete="tel" value={form.mpesa_number || ''} onChange={(event) => updateForm(program.id, 'mpesa_number', event.target.value)} /></label>
             {formError && <div className="alert alert-error" role="alert">{formError}</div>}
             <button className="button button-primary" type="submit" disabled={busyId === program.id}>{busyId === program.id ? 'Submitting…' : 'Submit application'}</button>
-          </form> : program.funding_status === 'closed' ? <p className="support-not-eligible">This programme is not accepting applications because its funding is closed.</p> : <p className="support-not-eligible">Your verified Main Contest average has not reached this programme’s cutoff. Complete contest assessments; payment and attempt count do not increase merit.</p>}
+          </form> : <p className="support-not-eligible">{program.eligibility_reason || 'Not currently eligible under the published programme rules.'}</p>}
         </article>
       })}</div>}
     </section>
@@ -349,9 +349,210 @@ function SupportApplicationReview({ application, busy, onReview }) {
 }
 
 export function SponsoredView() {
+  const { user } = useAuth()
+  const [filters, setFilters] = useState({ field: '', week: '' })
+  const [assessments, setAssessments] = useState([])
+  const [payments, setPayments] = useState([])
+  const [adminPayments, setAdminPayments] = useState([])
+  const [paymentReferences, setPaymentReferences] = useState({})
+  const [transactionIds, setTransactionIds] = useState({})
+  const [rejectionReasons, setRejectionReasons] = useState({})
+  const [attempt, setAttempt] = useState(null)
+  const [answers, setAnswers] = useState({})
+  const [reasoning, setReasoning] = useState({})
+  const [remaining, setRemaining] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [adminError, setAdminError] = useState('')
+  const [status, setStatus] = useState({ loading: true, error: '' })
+  const isAdmin = user?.role === 'admin' || user?.is_admin
+
+  const load = async () => {
+    setStatus({ loading: true, error: '' })
+    try {
+      const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value))
+      const [{ data }, paymentResponse] = await Promise.all([
+        api.get('/cohorts/sponsored-view/assessments/', { params }),
+        api.get('/cohorts/sponsored-view/payments/'),
+      ])
+      setAssessments(data.results || [])
+      setPayments(unwrapList(paymentResponse.data))
+      if (isAdmin) {
+        try {
+          const { data: adminData } = await api.get('/cohorts/admin/sponsored-view/payments/')
+          setAdminPayments(unwrapList(adminData))
+          setAdminError('')
+        } catch (requestError) {
+          setAdminError(getErrorMessage(requestError))
+        }
+      }
+      setStatus({ loading: false, error: '' })
+    } catch (requestError) {
+      setStatus({ loading: false, error: getErrorMessage(requestError) })
+    }
+  }
+  useEffect(() => { load() }, [filters.field, filters.week, isAdmin])
+
+  useEffect(() => {
+    if (!attempt?.deadline_at || !attempt?.server_time || attempt.status !== 'in_progress') {
+      setRemaining(null)
+      return undefined
+    }
+    const deadline = Date.parse(attempt.deadline_at)
+    const offset = Date.parse(attempt.server_time) - Date.now()
+    if (!Number.isFinite(deadline) || !Number.isFinite(offset)) return undefined
+    const update = () => setRemaining(Math.max(0, Math.ceil((deadline - (Date.now() + offset)) / 1000)))
+    update()
+    const timer = window.setInterval(update, 1000)
+    return () => window.clearInterval(timer)
+  }, [attempt?.id, attempt?.deadline_at, attempt?.server_time, attempt?.status])
+
+  useEffect(() => {
+    if (!attempt?.id || attempt.status !== 'in_progress') return undefined
+    const timer = window.setTimeout(() => {
+      api.post(`/cohorts/sponsored-view/attempts/${attempt.id}/answers/`, { answers, reasoning })
+        .catch((requestError) => {
+          if (![409, 410].includes(requestError.response?.status)) setError(getErrorMessage(requestError))
+        })
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [attempt?.id, attempt?.status, answers, reasoning])
+
+  const beginAttempt = async (paymentId) => {
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await api.post(`/cohorts/sponsored-view/payments/${paymentId}/start/`)
+      setAttempt(data)
+      setAnswers(data.answers || {})
+      setReasoning(data.reasoning || {})
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const requestPayment = async (assessment) => {
+    const reference = (paymentReferences[assessment.id] || '').trim()
+    if (!reference) {
+      setError('Enter the M-Pesa reference for your KSh 20 payment.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await api.post(`/cohorts/sponsored-view/assessments/${assessment.id}/payments/`, { payment_reference: reference })
+      setPaymentReferences((current) => ({ ...current, [assessment.id]: '' }))
+      await load()
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submitAttempt = async () => {
+    if (!attempt) return
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await api.post(`/cohorts/sponsored-view/attempts/${attempt.id}/submit/`, { answers, reasoning })
+      setAttempt(data)
+      await load()
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const reviewPayment = async (payment, decision) => {
+    const transactionId = (transactionIds[payment.id] || '').trim()
+    const rejectionReason = (rejectionReasons[payment.id] || '').trim()
+    if (decision === 'verified' && !transactionId) {
+      setError('Enter the confirmed M-Pesa transaction ID before verifying a payment.')
+      return
+    }
+    if (decision === 'rejected' && !rejectionReason) {
+      setError('Provide a reason when rejecting a payment.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await api.post(`/cohorts/admin/sponsored-view/payments/${payment.id}/decision/`, {
+        status: decision,
+        mpesa_transaction_id: transactionId,
+        rejection_reason: rejectionReason,
+      })
+      await load()
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const updateAnswer = (questionId, answer) => setAnswers((current) => ({ ...current, [questionId]: answer }))
+  const updateReasoning = (questionId, value) => setReasoning((current) => ({ ...current, [questionId]: value }))
+  const attemptIsOpen = attempt?.status === 'in_progress' && remaining !== 0
+
   return <Page eyebrow="SPONSORED VIEW" title="Sponsored View Library" description="KSh 20 per attempt. Results and any reward remain subject to published rules, validation, funding, and approval.">
     <WeeklyScheduleNotice activity="sponsored_view" />
-    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Maximum five attempts per student per day, Monday–Thursday · 10 questions per assessment</span></div>
-    <Empty title="0 of 800 Sponsored View assessments are available">The current backend has no Sponsored View assessment or attempt records (0 of the 8,000-question target). Payment and rewards are not enabled for this library yet.</Empty>
+    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Maximum five paid attempts per student per day, Monday–Thursday · 10 questions per assessment · target 800 assessments / 8,000 questions</span></div>
+    <div className="filter-row"><label>Study area<select name="field" value={filters.field} onChange={(event) => setFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={filters.week} onChange={(event) => setFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label></div>
+    {error && <div className="alert alert-error" role="alert">{error}</div>}
+    {status.loading ? <Loading label="Finding published Sponsored View assessments…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : assessments.length === 0 ? <Empty title="No complete, published Sponsored View assessments match these filters">No approved assessment content is currently available for this selection. The published content count is zero; no placeholder assessments are shown.</Empty> : <div className="content-grid">{assessments.map((assessment) => {
+      const assessmentPayments = payments.filter((item) => item.assessment_id === assessment.id)
+      const pendingPayment = assessmentPayments.find((item) => item.status === 'pending')
+      const payment = assessmentPayments.find((item) => item.status === 'verified' && item.attempt?.status === 'in_progress')
+        || assessmentPayments.find((item) => item.status === 'verified' && !item.attempt)
+        || assessmentPayments.find((item) => item.status === 'verified')
+        || pendingPayment
+        || assessmentPayments[0]
+      const canRequestAnother = !pendingPayment && (
+        !payment
+        || payment.status === 'rejected'
+        || ['graded', 'timed_out'].includes(payment.attempt?.status)
+      )
+      return <article className="tutorial-card sponsored-view-card" key={assessment.id}>
+        <div className="tutorial-card-top"><span className="tag">{assessment.field}</span><span>Week {assessment.week}</span></div>
+        <h2>{assessment.title}</h2><p>{assessment.description}</p>
+        <p>{assessment.window_closes_at ? `Available now · closes ${new Date(assessment.window_closes_at).toLocaleString()}` : `Next opening: ${assessment.next_opening_at ? new Date(assessment.next_opening_at).toLocaleString() : 'not scheduled'}`}</p>
+        <div className="tutorial-meta"><span>{assessment.question_count} questions</span><span>KSh {assessment.access_price_kes} per attempt</span></div>
+        {payment && <p className={`contest-status status-${payment.status}`}>Payment: {payment.status.replaceAll('_', ' ')}{payment.rejection_reason ? ` — ${payment.rejection_reason}` : ''}</p>}
+        {assessmentPayments.filter((item) => item.id !== payment?.id).map((otherPayment) => <p key={otherPayment.id}>Another attempt: payment {otherPayment.status.replaceAll('_', ' ')}{otherPayment.attempt?.score != null ? ` · score ${otherPayment.attempt.score}%` : ''}</p>)}
+        {payment?.attempt && <p>Attempt: {payment.attempt.status.replaceAll('_', ' ')}{payment.attempt.score != null ? ` · Score ${payment.attempt.score}%` : ''}</p>}
+        {payment?.status === 'verified' && <button className="button button-primary" disabled={busy || !assessment.can_start} onClick={() => beginAttempt(payment.id)}>{assessment.can_start ? payment.attempt?.status === 'in_progress' ? 'Resume assessment' : payment.attempt ? 'View result' : 'Start assessment' : 'Available Monday–Thursday'}</button>}
+        {pendingPayment && <p role="status">Payment is awaiting administrator verification. Your library access will appear here as soon as it is verified.</p>}
+        {canRequestAnother && <form className="form-stack" onSubmit={(event) => { event.preventDefault(); requestPayment(assessment) }}>
+              <p>Pay KSh 20 to Till 1598106, then submit the M-Pesa payment reference. Access begins immediately after an administrator verifies payment.</p>
+              <label>M-Pesa payment reference<input required maxLength={255} autoComplete="off" value={paymentReferences[assessment.id] || ''} onChange={(event) => setPaymentReferences((current) => ({ ...current, [assessment.id]: event.target.value }))} /></label>
+              <button className="button button-primary" type="submit" disabled={busy || !assessment.window_closes_at}>{assessment.window_closes_at ? 'Submit payment for verification' : 'Payment access Monday–Thursday'}</button>
+            </form>}
+      </article>
+    })}</div>}
+    {attempt && <section className="panel sponsored-attempt" aria-labelledby="sponsored-attempt-title">
+      <div className="contest-section-heading"><div><div className="eyebrow">{attempt.field}</div><h2 id="sponsored-attempt-title">{attempt.title}</h2></div><span className="contest-status">{attempt.status.replaceAll('_', ' ')}</span></div>
+      {attempt.status === 'in_progress' && <p role="timer">Time remaining: {remaining == null ? '…' : `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`}</p>}
+      {!attemptIsOpen && attempt.status === 'in_progress' && <p role="status">This timed attempt has expired or its access window has closed. Saved progress is retained; the server controls the final deadline.</p>}
+      <div className="assessment-question-list">{attempt.questions.map((question) => <fieldset className="lesson-section" key={question.id} disabled={!attemptIsOpen || busy}>
+        <legend><strong>{question.order}. {question.prompt}</strong></legend>
+        {question.options.map((option) => <label className="assessment-option" key={option}><input type="radio" name={`sponsored-${question.id}`} checked={answers[question.id] === option || question.selected_answer === option} onChange={() => updateAnswer(question.id, option)} />{option}</label>)}
+        {question.requires_reasoning && <label>Written reasoning<textarea maxLength={5000} required={attemptIsOpen} value={reasoning[question.id] || question.written_reasoning || ''} onChange={(event) => updateReasoning(question.id, event.target.value)} /></label>}
+        {attempt.status === 'graded' && <p><strong>Correct answer:</strong> {question.correct_answer}<br />{question.rationale}</p>}
+      </fieldset>)}</div>
+      {attemptIsOpen && <button className="button button-primary" disabled={busy || answers && Object.keys(answers).length !== attempt.questions.length} onClick={submitAttempt}>{busy ? 'Submitting…' : 'Submit assessment'}</button>}
+      {attempt.status === 'graded' && <p role="status">Final score: {attempt.score}%</p>}
+    </section>}
+    {isAdmin && <section className="panel admin-support-applications"><div className="contest-section-heading"><div><div className="eyebrow">ADMIN ONLY · PRIVATE PAYMENT DETAILS</div><h2>Sponsored View payment review</h2><p>Verify payment references against M-Pesa before granting access. Each verified payment grants one attempt.</p></div><button className="button button-quiet" onClick={load}>↻ Refresh</button></div>
+      {adminError ? <ErrorState message={adminError} retry={load} /> : adminPayments.length === 0 ? <Empty title="No Sponsored View payments to review" /> : <div className="support-application-list">{adminPayments.map((payment) => <article className="support-application-status" key={payment.id}><strong>{payment.student_name} · {payment.assessment_title}</strong><span>{payment.status} · KSh {payment.amount_kes}</span><small>{payment.student_email} · {payment.field} · {payment.payment_reference}</small>{payment.status === 'pending' && <div className="form-stack">
+        <label>Confirmed M-Pesa transaction ID<input required value={transactionIds[payment.id] || ''} onChange={(event) => setTransactionIds((current) => ({ ...current, [payment.id]: event.target.value }))} /></label>
+        <button className="button button-primary" disabled={busy} onClick={() => reviewPayment(payment, 'verified')}>Verify payment and grant access</button>
+        <label>Rejection reason<input required value={rejectionReasons[payment.id] || ''} onChange={(event) => setRejectionReasons((current) => ({ ...current, [payment.id]: event.target.value }))} /></label>
+        <button className="button button-quiet" disabled={busy} onClick={() => reviewPayment(payment, 'rejected')}>Reject payment</button>
+      </div>}</article>)}</div>}
+    </section>}
   </Page>
 }

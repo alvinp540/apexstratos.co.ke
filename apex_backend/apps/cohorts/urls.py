@@ -28,8 +28,26 @@ from .support_views import (
     SupportApplicationListView,
     SupportProgramListView,
 )
+from .sponsored_views import (
+    SaveSponsoredViewAttemptAnswersView,
+    SponsoredViewAssessmentListView,
+    SponsoredViewPaymentCreateView,
+    SponsoredViewPaymentAdminListView,
+    SponsoredViewPaymentDecisionView,
+    SponsoredViewPaymentListView,
+    StartSponsoredViewAttemptView,
+    SubmitSponsoredViewAttemptView,
+)
 
 urlpatterns = [
+    path('sponsored-view/assessments/', SponsoredViewAssessmentListView.as_view(), name='sponsored-view-assessment-list'),
+    path('sponsored-view/assessments/<uuid:assessment_id>/payments/', SponsoredViewPaymentCreateView.as_view(), name='sponsored-view-payment-create'),
+    path('sponsored-view/payments/', SponsoredViewPaymentListView.as_view(), name='sponsored-view-payment-list'),
+    path('sponsored-view/payments/<uuid:payment_id>/start/', StartSponsoredViewAttemptView.as_view(), name='sponsored-view-attempt-start'),
+    path('sponsored-view/attempts/<uuid:attempt_id>/answers/', SaveSponsoredViewAttemptAnswersView.as_view(), name='sponsored-view-attempt-answers'),
+    path('sponsored-view/attempts/<uuid:attempt_id>/submit/', SubmitSponsoredViewAttemptView.as_view(), name='sponsored-view-attempt-submit'),
+    path('admin/sponsored-view/payments/', SponsoredViewPaymentAdminListView.as_view(), name='sponsored-view-payment-admin-list'),
+    path('admin/sponsored-view/payments/<uuid:payment_id>/decision/', SponsoredViewPaymentDecisionView.as_view(), name='sponsored-view-payment-admin-decision'),
     path('support/programs/', SupportProgramListView.as_view(), name='support-program-list'),
     path('support/applications/', SupportApplicationListView.as_view(), name='support-application-list'),
     path('admin/support/applications/', SupportApplicationAdminListView.as_view(), name='support-application-admin-list'),
