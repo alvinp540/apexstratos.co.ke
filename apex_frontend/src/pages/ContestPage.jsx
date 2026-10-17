@@ -11,6 +11,7 @@ import {
   getMainContestLibrary,
   getMainContestPaymentReviews,
   getMainContestPayments,
+  getMyContestCycleLeaderboard,
   saveMainContestAttemptAnswers,
   startMainContestAssessment,
   submitMainContestAttempt,
@@ -69,6 +70,7 @@ export default function ContestPage() {
   const [libraryFilters, setLibraryFilters] = useState({ field: '', week: '' })
   const [libraryLoading, setLibraryLoading] = useState(true)
   const [libraryError, setLibraryError] = useState('')
+  const [cycleStanding, setCycleStanding] = useState(null)
   const [adminPayments, setAdminPayments] = useState([])
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(true)
@@ -102,6 +104,7 @@ export default function ContestPage() {
       ['profile', () => import('../api/profileAPI').then(({ getMyProfile }) => getMyProfile())],
       ['payments', getMainContestPayments],
       ['contests', getMainContestAssessments],
+      ['cycleStanding', getMyContestCycleLeaderboard],
     ]
     if (user?.is_admin) requests.push(['adminPayments', getMainContestPaymentReviews])
     const results = await Promise.all(requests.map(async ([key, request]) => {
@@ -120,6 +123,7 @@ export default function ContestPage() {
     }
     setPayments(unwrapList(resultMap.payments))
     setContests(unwrapList(resultMap.contests))
+    setCycleStanding(resultMap.cycleStanding || null)
     setAdminPayments(unwrapList(resultMap.adminPayments))
     setErrors(nextErrors)
     setLoading(false)
@@ -155,6 +159,17 @@ export default function ContestPage() {
       })
     } catch (error) {
       setErrors((current) => ({ ...current, contests: getErrorMessage(error) }))
+    }
+    try {
+      const { data } = await getMyContestCycleLeaderboard()
+      setCycleStanding(data)
+      setErrors((current) => {
+        const next = { ...current }
+        delete next.cycleStanding
+        return next
+      })
+    } catch (error) {
+      setErrors((current) => ({ ...current, cycleStanding: getErrorMessage(error) }))
     }
   }, [])
 
@@ -335,14 +350,26 @@ export default function ContestPage() {
       <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST LIBRARY</div><h2>KSh 100 per applicable access period</h2><p>Each published assessment contains ten questions. Payment verification grants field-specific access; the 20-minute timer starts only when the server accepts your start action during the Friday–Sunday window.</p></div><span className="contest-price">{libraryCount} matching</span></div>
       <WeeklyScheduleNotice activity="main_contest" />
       <div className="filter-row"><label>Study area<select value={libraryFilters.field} onChange={(event) => setLibraryFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All study areas</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label><label>Week<select value={libraryFilters.week} onChange={(event) => setLibraryFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><button className="button button-quiet" onClick={loadLibrary}>↻ Refresh library</button></div>
-      {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <div className="content-grid">{libraryItems.map((assessment) => <article className="tutorial-card" key={assessment.id}><div className="tutorial-card-top"><span className="tag">{assessment.field}</span><span className="tag">Week {assessment.week}</span></div><h3>{assessment.title}</h3><p>{assessment.description}</p><div className="tutorial-meta"><span>10 questions · 20 minutes</span><span>{assessment.attempt?.status === 'graded' ? `Completed · ${assessment.attempt.score}%` : assessment.attempt?.status === 'timed_out' ? 'Attempt expired' : assessment.can_start ? 'Available now · EAT' : `Next opening: ${formatDate(assessment.next_opening_at)}`}</span></div>{(!assessment.attempt || assessment.attempt.status === 'in_progress') && <button className="button button-primary" disabled={!assessment.can_start} onClick={() => startContest(assessment)}>{assessment.attempt?.status === 'in_progress' ? 'Resume assessment' : assessment.can_start ? 'Start assessment' : 'Requires verified access and Friday–Sunday window'}</button>}{assessment.attempt?.status === 'graded' && assessment.attempt.questions?.length > 0 && <details className="contest-answer-review"><summary>Review answers and explanations</summary><ol>{assessment.attempt.questions.map((question) => <li key={question.id}><strong>{question.prompt}</strong><p>Your answer: {question.selected_answer || 'No answer submitted'}</p><p>Correct answer: {question.correct_answer}</p><p>{question.rationale}</p></li>)}</ol></details>}</article>)}</div>}
+      {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <div className="content-grid">{libraryItems.map((assessment) => {
+        const locked = !assessment.has_verified_access && assessment.attempt?.status !== 'in_progress' && assessment.attempt?.status !== 'graded'
+        return <article className="tutorial-card" key={assessment.id}>
+          <div className="tutorial-card-top"><span className="tag">{assessment.field}</span><span className="tag">Week {assessment.week}</span></div>
+          <div className={`assessment-preview${locked ? ' assessment-preview-locked' : ''}`} aria-hidden={locked || undefined}>
+            <h3>{assessment.title}</h3><p>{assessment.description}</p>
+          </div>
+          {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 100 payment is verified for this study area. <a href="#contest-payment-form">Go to payment form.</a></p>}
+          <div className="tutorial-meta"><span>10 questions · 20 minutes · KSh {assessment.access_price_kes}</span><span>{assessment.attempt?.status === 'graded' ? `Completed · ${assessment.attempt.score}%` : assessment.attempt?.status === 'timed_out' ? 'Attempt expired' : assessment.can_start ? 'Available now · EAT' : `Next opening: ${formatDate(assessment.next_opening_at)}`}</span></div>
+          {(!assessment.attempt || assessment.attempt.status === 'in_progress') && <button className="button button-primary" disabled={!assessment.can_start} onClick={() => startContest(assessment)}>{assessment.attempt?.status === 'in_progress' ? 'Resume assessment' : assessment.can_start ? 'Start assessment' : locked ? 'Requires verified payment and Friday–Sunday access' : 'Available Friday–Sunday'}</button>}
+          {assessment.attempt?.status === 'graded' && assessment.attempt.questions?.length > 0 && <details className="contest-answer-review"><summary>Review answers and explanations</summary><ol>{assessment.attempt.questions.map((question) => <li key={question.id}><strong>{question.prompt}</strong><p>Your answer: {question.selected_answer || 'No answer submitted'}</p><p>Correct answer: {question.correct_answer}</p><p>{question.rationale}</p></li>)}</ol></details>}
+        </article>
+      })}</div>}
     </section>
     <section className="panel contest-payment-panel">
       <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST ACCESS</div><h2>Payment review</h2><p>Submit your KSh 100 M-Pesa reference for the official study area you want to enter. Payment is reviewed by an administrator and does not add merit.</p></div><span className="contest-price">KES 100</span></div>
       {errors.profile && <div className="alert alert-error" role="alert">Profile details could not be loaded. Your registered phone and name will be validated by the server when you submit.</div>}
       {errors.payments && <ErrorState message={errors.payments} retry={load} />}
       <div className="contest-payment-layout">
-        <form className="contest-payment-form" onSubmit={submitPayment}>
+        <form id="contest-payment-form" className="contest-payment-form" onSubmit={submitPayment}>
           {errors.paymentSubmit && <div className="alert alert-error" role="alert">{errors.paymentSubmit}</div>}
           {paymentSubmitted && <div className="alert alert-success" role="status">Payment reference submitted. It will remain pending until reviewed by an administrator.</div>}
           <label>Full name on your Apex profile<input value={paymentForm.full_name} onChange={(event) => setPaymentForm({ ...paymentForm, full_name: event.target.value })} required autoComplete="name" /></label>
@@ -361,6 +388,16 @@ export default function ContestPage() {
 
     {activeAttempt && activeAssessment ? <ContestAttempt assessment={activeAssessment} attempt={activeAttempt} answers={answers} reasoning={reasoning} onAnswer={(questionId, answer) => updateAnswers({ ...answersRef.current, [questionId]: answer })} onReasoning={(questionId, text) => updateReasoning({ ...reasoningRef.current, [questionId]: text })} onSubmit={submitAnswers} onExit={closeAttempt} onExpireRetry={expireAttempt} timer={timer} submitting={submitting} error={errors.attempt} /> : <section className="contest-assessment-section">
       <div className="contest-section-heading"><div><div className="eyebrow">ASSESSMENT WINDOW</div><h2>Contest assessments and results</h2><p>Published assessments and previous results remain visible. New attempts can only start Friday through Sunday EAT after field-specific payment verification.</p></div><button className="button button-quiet" onClick={refreshContests}>↻ Refresh</button></div>
+      <div className="contest-cycle-standing" aria-live="polite">
+        <div><div className="eyebrow">WEEKLY MAIN CONTEST STANDING</div><strong>{cycleStanding?.rank ? `#${cycleStanding.rank}` : cycleStanding?.rank === null ? 'No rank yet' : 'Loading standing…'}</strong></div>
+        {errors.cycleStanding ? <p role="alert">{errors.cycleStanding}</p> : cycleStanding?.rank == null ? <p>Complete a verified, unflagged Main Contest assessment to appear in the provisional weekly standings.</p> : <div className="contest-cycle-details">
+          <span>{cycleStanding.field} · {cycleStanding.ranking_status}</span>
+          <span>{cycleStanding.average_score}% average · {cycleStanding.participant_count} participants</span>
+          <span>{formatDate(cycleStanding.cycle_start)} – {formatDate(cycleStanding.cycle_end)}</span>
+          {cycleStanding.tie_break_applied && cycleStanding.tie_break_seconds != null && <span>Equivalent-assessment tie-break: {cycleStanding.tie_break_seconds} seconds</span>}
+        </div>}
+        <p className="contest-cycle-disclaimer">Provisional Friday–Sunday standing only; it is not a finalized four-week Merit cycle or a promise of an award or payout.</p>
+      </div>
       {errors.attempt && <div className="alert alert-error" role="alert">{errors.attempt}</div>}
       {errors.contests ? <ErrorState message={errors.contests} retry={refreshContests} /> : loading ? <Loading label="Loading published assessments and results…" /> : contests.length === 0 ? <Empty title="No published assessments or previous results">There are no published main-contest assessments for verified fields or previous attempts on this account.</Empty> : <div className="content-grid contest-card-grid">{contests.map((assessment) => <ContestCard key={assessment.id} assessment={assessment} onStart={startContest} onResume={openAttempt} />)}</div>}
     </section>}

@@ -1,7 +1,8 @@
+import json
+from collections import defaultdict
 from datetime import datetime, time, timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Avg, Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -516,6 +517,7 @@ class ContestLibraryView(APIView):
                 'question_count': 10,
                 'duration_minutes': 20,
                 'access_price_kes': 100,
+                'has_verified_access': entitled,
                 'can_start': entitled and window is not None,
                 'window_closes_at': window[1] if window else None,
                 'next_opening_at': None if window else weekly_next_opening('main_contest', now),
@@ -782,6 +784,38 @@ class SubmitContestAssessmentView(APIView):
 class MyContestCycleLeaderboardView(APIView):
     permission_classes = (IsAuthenticated,)
 
+    @staticmethod
+    def _assessment_set_key(attempts):
+        key = []
+        elapsed_seconds = 0
+        for attempt in attempts:
+            snapshot = attempt['assessment_snapshot']
+            if (
+                not isinstance(snapshot, dict)
+                or not isinstance(snapshot.get('questions'), list)
+                or not snapshot.get('questions')
+                or not attempt['started_at']
+                or not attempt['submitted_at']
+            ):
+                return None, None
+            elapsed = (attempt['submitted_at'] - attempt['started_at']).total_seconds()
+            if elapsed <= 0:
+                return None, None
+            try:
+                question_set = json.dumps(
+                    {
+                        'questions': snapshot['questions'],
+                        'scoring_rule': snapshot.get('scoring_rule'),
+                    },
+                    sort_keys=True,
+                    separators=(',', ':'),
+                )
+            except (TypeError, ValueError):
+                return None, None
+            key.append((str(attempt['assessment_id']), question_set))
+            elapsed_seconds += elapsed
+        return tuple(sorted(key)), elapsed_seconds
+
     def get(self, request):
         attempts = AssessmentScheduleAttempt.objects.filter(
             user=request.user,
@@ -800,9 +834,14 @@ class MyContestCycleLeaderboardView(APIView):
                 'average_score': None,
                 'attempt_count': 0,
                 'participant_count': 0,
+                'ranking_status': 'provisional',
+                'cycle_kind': 'weekly_contest',
+                'tie_break_seconds': None,
+                'tie_break_applied': False,
                 'ranking_method': (
-                    'Competition rank by average score across verified, unflagged '
-                    'Main Contest attempts in a Friday–Sunday East Africa Time cycle.'
+                    'Provisional weekly contest rank by average score. Elapsed time is '
+                    'only a tie-break for tied participants with the same assessment IDs, '
+                    'question snapshots, and scoring rules; otherwise tied scores share a rank.'
                 ),
             })
 
@@ -810,7 +849,7 @@ class MyContestCycleLeaderboardView(APIView):
         friday = latest_local_date - timedelta(days=(latest_local_date.weekday() - 4) % 7)
         cycle_start = timezone.make_aware(datetime.combine(friday, time.min), EAT)
         cycle_end = cycle_start + timedelta(days=3)
-        cycle_scores = list(
+        cycle_attempts = list(
             AssessmentScheduleAttempt.objects.filter(
                 assessment__field=latest.assessment.field,
                 status='graded',
@@ -818,26 +857,92 @@ class MyContestCycleLeaderboardView(APIView):
                 is_flagged=False,
                 submitted_at__gte=cycle_start,
                 submitted_at__lt=cycle_end,
-            ).values('user_id').annotate(
-                average_score=Avg('score'),
-                attempt_count=Count('id'),
-            ).order_by('-average_score', 'user_id')
+            ).values(
+                'user_id',
+                'assessment_id',
+                'score',
+                'started_at',
+                'submitted_at',
+                'assessment_snapshot',
+            ).order_by('user_id', 'assessment_id')
         )
+        attempts_by_user = defaultdict(list)
+        for attempt in cycle_attempts:
+            attempts_by_user[attempt['user_id']].append(attempt)
+
+        cycle_scores = []
+        for user_id, attempts_for_user in attempts_by_user.items():
+            assessment_set, elapsed_seconds = self._assessment_set_key(attempts_for_user)
+            cycle_scores.append({
+                'user_id': user_id,
+                'average_score': round(
+                    sum(attempt['score'] for attempt in attempts_for_user) / len(attempts_for_user),
+                    2,
+                ),
+                'attempt_count': len(attempts_for_user),
+                'assessment_set': assessment_set,
+                'elapsed_seconds': elapsed_seconds,
+            })
+        cycle_scores.sort(key=lambda entry: (-entry['average_score'], entry['user_id']))
+
         rank = None
         average_score = None
         attempt_count = 0
-        previous_score = None
-        previous_rank = None
-        for index, entry in enumerate(cycle_scores, 1):
-            score = round(entry['average_score'], 2)
-            if score != previous_score:
-                previous_rank = index
-            if entry['user_id'] == request.user.id:
-                rank = previous_rank
-                average_score = score
-                attempt_count = entry['attempt_count']
+        tie_break_seconds = None
+        tie_break_applied = False
+        start_index = 0
+        while start_index < len(cycle_scores):
+            end_index = start_index + 1
+            score = cycle_scores[start_index]['average_score']
+            while (
+                end_index < len(cycle_scores)
+                and cycle_scores[end_index]['average_score'] == score
+            ):
+                end_index += 1
+            score_group = cycle_scores[start_index:end_index]
+            assessment_sets = {entry['assessment_set'] for entry in score_group}
+            comparable = (
+                len(score_group) > 1
+                and len(assessment_sets) == 1
+                and None not in assessment_sets
+                and all(entry['elapsed_seconds'] is not None for entry in score_group)
+            )
+            block_tie_break_applied = False
+            if comparable:
+                score_group.sort(key=lambda entry: (entry['elapsed_seconds'], entry['user_id']))
+                elapsed_groups = []
+                for entry in score_group:
+                    if not elapsed_groups or elapsed_groups[-1][0]['elapsed_seconds'] != entry['elapsed_seconds']:
+                        elapsed_groups.append([entry])
+                    else:
+                        elapsed_groups[-1].append(entry)
+                ordered_groups = []
+                group_index = 0
+                for elapsed_group in elapsed_groups:
+                    ordered_groups.append((start_index + group_index + 1, elapsed_group))
+                    group_index += len(elapsed_group)
+                block_tie_break_applied = len(elapsed_groups) > 1
+            else:
+                ordered_groups = [(start_index + 1, score_group)]
+
+            for group_rank, entries in ordered_groups:
+                if any(entry['user_id'] == request.user.id for entry in entries):
+                    student_entry = next(
+                        entry for entry in entries if entry['user_id'] == request.user.id
+                    )
+                    rank = group_rank
+                    average_score = student_entry['average_score']
+                    attempt_count = student_entry['attempt_count']
+                    tie_break_applied = block_tie_break_applied
+                    tie_break_seconds = (
+                        student_entry['elapsed_seconds']
+                        if comparable
+                        else None
+                    )
+                    break
+            if rank is not None:
                 break
-            previous_score = score
+            start_index = end_index
 
         return Response({
             'rank': rank,
@@ -847,9 +952,16 @@ class MyContestCycleLeaderboardView(APIView):
             'average_score': average_score,
             'attempt_count': attempt_count,
             'participant_count': len(cycle_scores),
+            'ranking_status': 'provisional',
+            'cycle_kind': 'weekly_contest',
+            'tie_break_seconds': tie_break_seconds,
+            'tie_break_applied': tie_break_applied,
             'ranking_method': (
-                'Competition rank by average score across verified, unflagged '
-                'Main Contest attempts in a Friday–Sunday East Africa Time cycle; '
-                'equal averages share a rank.'
+                'Provisional weekly contest rank by average score across verified, unflagged '
+                'Main Contest attempts in a Friday–Sunday East Africa Time cycle. When tied '
+                'participants have identical assessment IDs, question snapshots, and scoring '
+                'rules, shorter server-recorded elapsed time ranks higher; equal elapsed times '
+                'share a rank. Tied scores across different or unverifiable assessment sets '
+                'share a rank.'
             ),
         })

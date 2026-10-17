@@ -136,6 +136,31 @@ class MainContestAccessTests(APITestCase):
             ),
         )
 
+    def create_graded_attempt(self, user, assessment, score, started_at, submitted_at):
+        snapshot = {
+            'questions': [
+                {
+                    'id': str(question.id),
+                    'prompt': question.prompt,
+                    'options': question.options,
+                    'correct_answer': question.correct_answer,
+                }
+                for question in assessment.questions.order_by('order')
+            ],
+            'scoring_rule': 'Each of ten questions is worth 10 percentage points.',
+        }
+        attempt = AssessmentScheduleAttempt.objects.create(
+            user=user,
+            assessment=assessment,
+            assessment_snapshot=snapshot,
+            status='graded',
+            score=score,
+            submitted_at=submitted_at,
+        )
+        AssessmentScheduleAttempt.objects.filter(pk=attempt.pk).update(started_at=started_at)
+        attempt.refresh_from_db()
+        return attempt
+
     def test_library_lists_valid_assessments_for_all_eight_weeks_without_answer_keys(self):
         self.make_published_assessment(month=2, week=1)
 
@@ -147,8 +172,27 @@ class MainContestAccessTests(APITestCase):
         self.assertEqual(assessment['week'], 5)
         self.assertEqual(assessment['question_count'], 10)
         self.assertEqual(assessment['access_price_kes'], 100)
+        self.assertFalse(assessment['has_verified_access'])
         self.assertNotIn('video_url', assessment)
         self.assertNotIn('correct_answer', assessment)
+
+    def test_library_marks_field_access_only_after_payment_is_verified(self):
+        self.make_published_assessment()
+        friday = timezone.make_aware(
+            datetime(2026, 10, 16, 10, 0),
+            ZoneInfo('Africa/Nairobi'),
+        )
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            locked = self.client.get(reverse('contest-assessment-library'))
+        self.assertFalse(locked.data['results'][0]['has_verified_access'])
+
+        self.grant_main_contest_access()
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            unlocked = self.client.get(reverse('contest-assessment-library'))
+
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertTrue(unlocked.data['results'][0]['has_verified_access'])
+        self.assertTrue(unlocked.data['results'][0]['can_start'])
 
     def test_library_excludes_assessments_without_ten_valid_questions(self):
         assessment = self.make_published_assessment()
@@ -422,46 +466,128 @@ class MainContestAccessTests(APITestCase):
             datetime(2026, 10, 16, 10, 0),
             ZoneInfo('Africa/Nairobi'),
         )
-        AssessmentScheduleAttempt.objects.create(
-            user=self.student,
-            assessment=assessment,
-            status='graded',
-            score=90,
-            submitted_at=friday,
+        self.create_graded_attempt(
+            self.student,
+            assessment,
+            90,
+            friday - timedelta(minutes=1),
+            friday,
         )
         peer = User.objects.create_user(
             email='cycle-peer@example.test',
             username='cycle-peer',
             password='temporary-test-only',
         )
-        AssessmentScheduleAttempt.objects.create(
-            user=peer,
-            assessment=assessment,
-            status='graded',
-            score=90,
-            submitted_at=friday + timedelta(minutes=5),
+        self.create_graded_attempt(
+            peer,
+            assessment,
+            90,
+            friday - timedelta(minutes=5),
+            friday,
         )
         lower_ranked = User.objects.create_user(
             email='cycle-lower@example.test',
             username='cycle-lower',
             password='temporary-test-only',
         )
-        AssessmentScheduleAttempt.objects.create(
-            user=lower_ranked,
-            assessment=assessment,
-            status='graded',
-            score=80,
-            submitted_at=friday + timedelta(minutes=10),
+        self.create_graded_attempt(
+            lower_ranked,
+            assessment,
+            80,
+            friday - timedelta(minutes=10),
+            friday,
         )
 
-        response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            response = self.client.get(reverse('contest-cycle-leaderboard-me'))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['rank'], 1)
         self.assertEqual(response.data['participant_count'], 3)
         self.assertEqual(response.data['average_score'], 90)
         self.assertEqual(response.data['cycle_start'], friday.replace(hour=0, minute=0))
-        self.assertIn('equal averages share a rank', response.data['ranking_method'])
+        self.assertEqual(response.data['tie_break_seconds'], 60)
+        self.assertTrue(response.data['tie_break_applied'])
+        self.assertEqual(response.data['ranking_status'], 'provisional')
+
+        self.client.force_authenticate(peer)
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            peer_response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+        self.assertEqual(peer_response.data['rank'], 2)
+        self.assertEqual(peer_response.data['tie_break_seconds'], 300)
+        self.client.force_authenticate(lower_ranked)
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            lower_score_response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+        self.assertEqual(lower_score_response.data['rank'], 3)
+
+    def test_equal_scores_with_equal_elapsed_time_share_rank(self):
+        assessment = self.make_published_assessment()
+        friday = timezone.make_aware(
+            datetime(2026, 10, 16, 10, 0),
+            ZoneInfo('Africa/Nairobi'),
+        )
+        peer = User.objects.create_user(
+            email='same-time-peer@example.test',
+            username='same-time-peer',
+            password='temporary-test-only',
+        )
+        for user in (self.student, peer):
+            self.create_graded_attempt(
+                user,
+                assessment,
+                90,
+                friday - timedelta(minutes=2),
+                friday,
+            )
+
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+
+        self.assertEqual(response.data['rank'], 1)
+        self.assertEqual(response.data['tie_break_seconds'], 120)
+        self.assertFalse(response.data['tie_break_applied'])
+        self.client.force_authenticate(peer)
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            peer_response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+        self.assertEqual(peer_response.data['rank'], 1)
+
+    def test_equal_scores_across_different_assessment_sets_share_rank(self):
+        assessment = self.make_published_assessment()
+        other_assessment = self.make_published_assessment(month=1, week=2)
+        friday = timezone.make_aware(
+            datetime(2026, 10, 16, 10, 0),
+            ZoneInfo('Africa/Nairobi'),
+        )
+        peer = User.objects.create_user(
+            email='different-set-peer@example.test',
+            username='different-set-peer',
+            password='temporary-test-only',
+        )
+        self.create_graded_attempt(
+            self.student,
+            assessment,
+            90,
+            friday - timedelta(minutes=1),
+            friday,
+        )
+        self.create_graded_attempt(
+            peer,
+            other_assessment,
+            90,
+            friday - timedelta(minutes=5),
+            friday,
+        )
+
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+
+        self.assertEqual(response.data['rank'], 1)
+        self.assertIsNone(response.data['tie_break_seconds'])
+        self.assertFalse(response.data['tie_break_applied'])
+        self.client.force_authenticate(peer)
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            peer_response = self.client.get(reverse('contest-cycle-leaderboard-me'))
+        self.assertEqual(peer_response.data['rank'], 1)
 
     def test_assessment_attempt_resumes_with_fixed_deadline_after_content_edit(self):
         self.grant_main_contest_access()

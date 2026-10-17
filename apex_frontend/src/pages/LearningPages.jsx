@@ -544,6 +544,7 @@ export function SponsoredView() {
         || assessmentPayments.find((item) => item.status === 'verified')
         || pendingPayment
         || assessmentPayments[0]
+      const locked = !assessmentPayments.some((item) => item.status === 'verified')
       const canRequestAnother = !pendingPayment && (
         !payment
         || payment.status === 'rejected'
@@ -551,7 +552,10 @@ export function SponsoredView() {
       )
       return <article className="tutorial-card sponsored-view-card" key={assessment.id}>
         <div className="tutorial-card-top"><span className="tag">{assessment.field}</span><span>Week {assessment.week}</span></div>
-        <h2>{assessment.title}</h2><p>{assessment.description}</p>
+        <div className={`assessment-preview${locked ? ' assessment-preview-locked' : ''}`} aria-hidden={locked || undefined}>
+          <h2>{assessment.title}</h2><p>{assessment.description}</p>
+        </div>
+        {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 20 payment is verified. Submit the payment reference below to request access.</p>}
         <p>{assessment.window_closes_at ? `Available now · closes ${new Date(assessment.window_closes_at).toLocaleString()}` : `Next opening: ${assessment.next_opening_at ? new Date(assessment.next_opening_at).toLocaleString() : 'not scheduled'}`}</p>
         <div className="tutorial-meta"><span>{assessment.question_count} questions</span><span>KSh {assessment.access_price_kes} per attempt</span></div>
         {payment && <p className={`contest-status status-${payment.status}`}>Payment: {payment.status.replaceAll('_', ' ')}{payment.rejection_reason ? ` — ${payment.rejection_reason}` : ''}</p>}
