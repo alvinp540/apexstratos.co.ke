@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import api, { getErrorMessage, unwrapList } from '../api/client'
 import { studyAreas } from '../data'
 import Page from '../components/Page'
-import { Empty, ErrorState, Loading } from '../components/States'
+import { Empty, ErrorState, Loading, PaginationControls } from '../components/States'
 import WeeklyScheduleNotice from '../components/WeeklyScheduleNotice'
 import SupportApplicationFields from '../components/SupportApplicationFields'
 import { useAuth } from '../context/AuthContext'
@@ -47,12 +47,11 @@ export function Tutorials() {
     setParams({ ...params, [event.target.name]: event.target.value })
     setPage(1)
   }
-  const pageCount = Math.max(1, Math.ceil(total / 20))
   return <Page eyebrow="LEARNING LIBRARY" title="Tutorial Library" description="Free written lessons and ten-question assessments, organized by study area and week.">
     <WeeklyScheduleNotice activity="tutorials" />
     <div className="library-summary"><strong>Free</strong><span>{total} matching published assessments · initial target 640 assessments / 6,400 questions</span></div>
     <div className="filter-row"><label>Study area<select name="field" value={params.field} onChange={update}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={params.week} onChange={update}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input name="topic" maxLength={120} value={params.topic} onChange={update} placeholder="Search titles and descriptions" /></label></div>
-    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorial assessments match these filters">The database currently has no published tutorial assessments for this selection.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><div className="filter-row library-pagination"><span>Page {page} of {pageCount} · {total} assessments</span><button className="button button-quiet" disabled={page <= 1 || status.loading} onClick={() => setPage((current) => current - 1)}>Previous</button><button className="button button-quiet" disabled={page >= pageCount || status.loading} onClick={() => setPage((current) => current + 1)}>Next</button></div></>}
+    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorial assessments match these filters">The database currently has no published tutorial assessments for this selection.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><PaginationControls page={page} total={total} onPageChange={setPage} /></>}
   </Page>
 }
 
@@ -75,12 +74,11 @@ export function AreaTutorials() {
     } catch (error) { setStatus({ loading: false, error: getErrorMessage(error) }) }
   }
   useEffect(() => { load() }, [field, week, topic, page])
-  const pageCount = Math.max(1, Math.ceil(total / 20))
   return <Page eyebrow="STUDY AREA" title={field} description="Published lessons available for this discipline.">
     <WeeklyScheduleNotice activity="tutorials" />
     <Link className="back-link inline-back" to="/study">← All study areas</Link>
     <div className="filter-row"><label>Week<select value={week} onChange={(event) => { setWeek(event.target.value); setPage(1) }}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={topic} onChange={(event) => { setTopic(event.target.value); setPage(1) }} placeholder="Search titles and descriptions" /></label></div>
-    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published tutorial assessments match this selection">The database currently has no published tutorial assessments for {field}.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><div className="filter-row library-pagination"><span>Page {page} of {pageCount} · {total} assessments</span><button className="button button-quiet" disabled={page <= 1 || status.loading} onClick={() => setPage((current) => current - 1)}>Previous</button><button className="button button-quiet" disabled={page >= pageCount || status.loading} onClick={() => setPage((current) => current + 1)}>Next</button></div></>}
+    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published tutorial assessments match this selection">The database currently has no published tutorial assessments for {field}.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><PaginationControls page={page} total={total} onPageChange={setPage} /></>}
   </Page>
 }
 

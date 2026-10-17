@@ -19,10 +19,13 @@ from apps.cohorts.models import (
     AssessmentScheduleQuestion,
     ParticipationPayment,
     SponsoredViewAssessment,
+    SponsoredViewAttempt,
     SponsoredViewPayment,
     SponsoredViewQuestion,
     Tutorial,
+    TutorialAttempt,
     TutorialQuestion,
+    TutorialProgress,
 )
 
 
@@ -293,27 +296,375 @@ class AssessmentImportTests(TestCase):
 class PublishedAssessmentLibraryIntegrationTests(TestCase):
     eat = ZoneInfo('Africa/Nairobi')
 
-    def test_seeds_real_starter_assessments_idempotently_without_sensitive_fields(self):
-        seed = 'seed_apexstratos_starter_libraries'
-        call_command(seed, '--apply', stdout=StringIO())
-        call_command(seed, '--apply', stdout=StringIO())
-
-        expected = (
-            (Tutorial, TutorialQuestion, 'tutorial'),
-            (SponsoredViewAssessment, SponsoredViewQuestion, 'assessment'),
-            (AssessmentSchedule, AssessmentScheduleQuestion, 'assessment'),
+    def _seed_existing_slot_conflicts(self):
+        tutorial = Tutorial.objects.create(
+            month=1,
+            week=1,
+            day=0,
+            daily_slot=1,
+            field='Software Development',
+            title='Existing software tutorial',
+            description='Existing tutorial record preserved during content import.',
+            learning_objectives=['Identify a requirement.', 'Test the requirement.', 'Record evidence.'],
+            concept_explanation='A test links a requirement to observed behavior.',
+            terminology_and_components='A requirement and a test are related evidence.',
+            why_it_matters='Evidence supports reliable decisions.',
+            how_it_works='Compare observed behavior with an expected result.',
+            worked_examples='Test an accepted and a rejected input.',
+            common_mistakes='Do not treat access as proof of capability.',
+            practical_application='Write a test for a learner workflow.',
+            decisions_and_tradeoffs='Prefer sufficient evidence with minimal data.',
+            related_concepts='Requirements, testing, and evidence.',
+            scheduled_for=timezone.now(),
+            status='published',
+            published_at=timezone.now(),
         )
-        for assessment_model, question_model, relation in expected:
-            assessment = assessment_model.objects.get(status='published')
-            self.assertEqual(question_model.objects.filter(**{relation: assessment}).count(), 10)
-            self.assertIn('apex-starter-', assessment.imported_external_id)
-            self.assertFalse(
-                assessment_model.objects.filter(
-                    field__in=('Medical and Health', 'Law and Society'),
-                    status='published',
-                ).exists()
-            )
+        sponsored = SponsoredViewAssessment.objects.create(
+            week=1,
+            slot=1,
+            field='Software Development',
+            title='Existing sponsored assessment',
+            description='Existing sponsored record preserved during content import.',
+            learning_objectives=['Identify a requirement.', 'Test the requirement.', 'Record evidence.'],
+            status='published',
+            published_at=timezone.now(),
+        )
+        contest = AssessmentSchedule.objects.create(
+            month=1,
+            week=1,
+            day=4,
+            assessment_slot=1,
+            field='Software Development',
+            title='Existing main contest assessment',
+            description='Existing contest record preserved during content import.',
+            learning_objectives=['Identify a requirement.', 'Test the requirement.', 'Record evidence.'],
+            scheduled_for=timezone.now(),
+            duration_minutes=20,
+            status='published',
+            published_at=timezone.now(),
+        )
+        for assessment, model, foreign_key in (
+            (tutorial, TutorialQuestion, 'tutorial'),
+            (sponsored, SponsoredViewQuestion, 'assessment'),
+            (contest, AssessmentScheduleQuestion, 'assessment'),
+        ):
+            for order in range(1, 11):
+                correct = f'Verify the expected result for item {order}.'
+                model.objects.create(
+                    **{foreign_key: assessment},
+                    order=order,
+                    prompt=f'Which action verifies existing schedule item {order}?',
+                    options=[
+                        correct,
+                        f'Ignore the expected result for item {order}.',
+                        f'Disable its validation for item {order}.',
+                        f'Retry item {order} without recording evidence.',
+                    ],
+                    correct_answer=correct,
+                    rationale='A direct check against expected behavior produces evidence.',
+                )
 
+    def test_populates_and_starts_real_assessments_without_publishing_sensitive_fields(self):
+        self._seed_existing_slot_conflicts()
+        dry_run = StringIO()
+        call_command(
+            'bootstrap_apexstratos_libraries',
+            '--allow-partial',
+            '--preserve-existing-slots',
+            stdout=dry_run,
+            stderr=StringIO(),
+        )
+        self.assertIn('would_insert=1501', dry_run.getvalue())
+        self.assertIn('failed=656', dry_run.getvalue())
         self.assertEqual(Tutorial.objects.count(), 1)
         self.assertEqual(SponsoredViewAssessment.objects.count(), 1)
         self.assertEqual(AssessmentSchedule.objects.count(), 1)
+
+        output = StringIO()
+        call_command(
+            'bootstrap_apexstratos_libraries',
+            '--apply',
+            '--publish',
+            '--allow-partial',
+            '--preserve-existing-slots',
+            stdout=output,
+            stderr=StringIO(),
+        )
+
+        self.assertEqual(Tutorial.objects.count(), 512)
+        self.assertEqual(TutorialQuestion.objects.count(), 5_120)
+        self.assertEqual(Tutorial.objects.filter(status='published').count(), 384)
+        self.assertEqual(SponsoredViewAssessment.objects.count(), 560)
+        self.assertEqual(SponsoredViewQuestion.objects.count(), 5_600)
+        self.assertEqual(SponsoredViewAssessment.objects.filter(status='published').count(), 400)
+        self.assertEqual(AssessmentSchedule.objects.count(), 432)
+        self.assertEqual(AssessmentScheduleQuestion.objects.count(), 4_320)
+        self.assertEqual(AssessmentSchedule.objects.filter(status='published').count(), 288)
+        self.assertIn('skipped_schedule_conflict=3', output.getvalue())
+        self.assertIn('failed=656', output.getvalue())
+        for model in (Tutorial, SponsoredViewAssessment, AssessmentSchedule):
+            self.assertEqual(
+                model.objects.filter(
+                    field__in=('Medical and Health', 'Law and Society'),
+                    status='published',
+                ).count(),
+                0,
+            )
+
+        student = User.objects.create_user(
+            email='assessment-library-learner@example.test',
+            username='assessment-library-learner',
+            password='test-password',
+            phone_number='0712345678',
+        )
+        client = APIClient()
+        client.force_authenticate(student)
+
+        tutorial_catalog = client.get(
+            reverse('tutorial-list'),
+            {'field': 'Software Development', 'week': 8},
+        )
+        self.assertEqual(tutorial_catalog.status_code, 200)
+        self.assertEqual(tutorial_catalog.data['count'], 8)
+        tutorial = Tutorial.objects.filter(
+            field='Software Development',
+            month=2,
+            week=4,
+            status='published',
+        ).order_by('day', 'daily_slot').first()
+        self.assertIsNotNone(tutorial)
+        self.assertEqual(len(tutorial_catalog.data['results'][0]['questions']), 10)
+        self.assertNotIn('correct_answer', tutorial_catalog.data['results'][0]['questions'][0])
+
+        tutorial_pages = client.get(
+            reverse('tutorial-list'),
+            {'field': 'Software Development', 'page_size': 20},
+        )
+        self.assertEqual(tutorial_pages.status_code, 200)
+        self.assertEqual(tutorial_pages.data['count'], 64)
+        self.assertEqual(len(tutorial_pages.data['results']), 20)
+        self.assertIsNotNone(tutorial_pages.data['next'])
+        tutorial_search = client.get(
+            reverse('tutorial-list'),
+            {'field': 'Software Development', 'topic': 'Existing tutorial record'},
+        )
+        self.assertEqual(tutorial_search.status_code, 200)
+        self.assertGreaterEqual(tutorial_search.data['count'], 1)
+        self.assertTrue(
+            all(
+                'existing tutorial record' in f"{item['title']} {item['description']}".lower()
+                for item in tutorial_search.data['results']
+            )
+        )
+
+        monday = datetime(2026, 10, 12, 10, tzinfo=self.eat)
+        with patch('apps.cohorts.views.timezone.now', return_value=monday):
+            tutorial_start = client.post(
+                reverse('tutorial-attempt-start', kwargs={'tutorial_id': tutorial.id}),
+                {},
+                format='json',
+            )
+        self.assertEqual(tutorial_start.status_code, 201)
+        self.assertEqual(len(tutorial_start.data['questions']), 10)
+        self.assertNotIn('correct_answer', tutorial_start.data['questions'][0])
+        tutorial_attempt = TutorialAttempt.objects.get(id=tutorial_start.data['id'])
+        tutorial_answers = {
+            str(question.id): question.correct_answer
+            for question in tutorial.questions.order_by('order')
+        }
+        tutorial_reasoning = {
+            str(question.id): 'This explains the evidence-based choice.'
+            for question in tutorial.questions.filter(requires_reasoning=True)
+        }
+        with patch('apps.cohorts.views.timezone.now', return_value=monday):
+            tutorial_submission = client.post(
+                reverse(
+                    'tutorial-attempt-submit',
+                    kwargs={'attempt_id': tutorial_attempt.id},
+                ),
+                {'answers': tutorial_answers, 'reasoning': tutorial_reasoning},
+                format='json',
+            )
+        self.assertEqual(tutorial_submission.status_code, 200)
+        self.assertEqual(tutorial_submission.data['score'], 100)
+        tutorial_progress = TutorialProgress.objects.get(user=student, tutorial=tutorial)
+        self.assertEqual(tutorial_progress.best_score, 100)
+        self.assertEqual(tutorial_progress.attempt_count, 1)
+
+        sponsored = SponsoredViewAssessment.objects.get(
+            field='Education',
+            week=8,
+            slot=1,
+            status='published',
+        )
+        unpaid_sponsored_catalog = client.get(
+            reverse('sponsored-view-assessment-list'),
+            {'field': sponsored.field, 'week': sponsored.week},
+        )
+        unpaid_sponsored = next(
+            item
+            for item in unpaid_sponsored_catalog.data['results']
+            if item['id'] == str(sponsored.id)
+        )
+        self.assertFalse(unpaid_sponsored['has_verified_access'])
+        self.assertFalse(unpaid_sponsored['can_start'])
+        self.assertEqual(unpaid_sponsored['access_price_kes'], 20)
+        SponsoredViewPayment.objects.create(
+            user=student,
+            assessment=sponsored,
+            amount_kes=20,
+            payment_reference='CONTENT-TEST-SPONSORED-01',
+            status='verified',
+            requested_at=monday,
+            verified_at=monday,
+        )
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday):
+            sponsored_start = client.post(
+                reverse(
+                    'sponsored-view-attempt-start',
+                    kwargs={
+                        'payment_id': SponsoredViewPayment.objects.get(
+                            user=student,
+                            assessment=sponsored,
+                        ).id,
+                    },
+                ),
+                {},
+                format='json',
+            )
+        self.assertEqual(sponsored_start.status_code, 201)
+        self.assertEqual(len(sponsored_start.data['questions']), 10)
+        self.assertNotIn('correct_answer', sponsored_start.data['questions'][0])
+        sponsored_catalog = client.get(
+            reverse('sponsored-view-assessment-list'),
+            {
+                'field': sponsored.field,
+                'week': sponsored.week,
+                'topic': sponsored.title.split()[-1],
+            },
+        )
+        self.assertEqual(sponsored_catalog.status_code, 200)
+        self.assertIn(
+            str(sponsored.id),
+            {str(item['id']) for item in sponsored_catalog.data['results']},
+        )
+        self.assertTrue(
+            all(item['has_verified_access'] for item in sponsored_catalog.data['results'])
+        )
+        sponsored_attempt = SponsoredViewAttempt.objects.get(
+            id=sponsored_start.data['id']
+        )
+        sponsored_answers = {
+            str(question.id): question.correct_answer
+            for question in sponsored.questions.order_by('order')
+        }
+        sponsored_reasoning = {
+            str(question.id): 'This explains the evidence-based choice.'
+            for question in sponsored.questions.filter(requires_reasoning=True)
+        }
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday):
+            sponsored_submission = client.post(
+                reverse(
+                    'sponsored-view-attempt-submit',
+                    kwargs={'attempt_id': sponsored_attempt.id},
+                ),
+                {'answers': sponsored_answers, 'reasoning': sponsored_reasoning},
+                format='json',
+            )
+        self.assertEqual(sponsored_submission.status_code, 200)
+        self.assertEqual(sponsored_submission.data['score'], 100)
+
+        contest = AssessmentSchedule.objects.get(
+            field='Education',
+            month=2,
+            week=4,
+            day=4,
+            assessment_slot=1,
+            status='published',
+        )
+        unpaid_contest_catalog = client.get(
+            reverse('contest-assessment-library'),
+            {
+                'field': contest.field,
+                'week': (contest.month - 1) * 4 + contest.week,
+            },
+        )
+        unpaid_contest = next(
+            item
+            for item in unpaid_contest_catalog.data['results']
+            if item['id'] == str(contest.id)
+        )
+        self.assertFalse(unpaid_contest['has_verified_access'])
+        self.assertFalse(unpaid_contest['can_start'])
+        self.assertEqual(unpaid_contest['access_price_kes'], 100)
+        friday = datetime(2026, 10, 16, 10, tzinfo=self.eat)
+        ParticipationPayment.objects.create(
+            user=student,
+            full_name='Assessment Library Learner',
+            phone_number='0712345678',
+            field='Education',
+            amount_kes=100,
+            till_number='1598106',
+            payment_reference='CONTENT-TEST-MAIN-01',
+            mpesa_transaction_id='CONTENT-TEST-TXN-01',
+            status='verified',
+            verification_notes='Verified test fixture for a published assessment start.',
+            verified_at=friday,
+            expires_at=friday + timedelta(days=3),
+        )
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            contest_start = client.post(
+                reverse('contest-assessment-start', kwargs={'assessment_id': contest.id}),
+                {},
+                format='json',
+            )
+        self.assertEqual(contest_start.status_code, 201)
+        self.assertEqual(len(contest_start.data['questions']), 10)
+        self.assertNotIn('correct_answer', contest_start.data['questions'][0])
+        contest_catalog = client.get(
+            reverse('contest-assessment-library'),
+            {
+                'field': contest.field,
+                'week': (contest.month - 1) * 4 + contest.week,
+                'topic': contest.title.split()[-1],
+            },
+        )
+        self.assertEqual(contest_catalog.status_code, 200)
+        self.assertIn(
+            str(contest.id),
+            {str(item['id']) for item in contest_catalog.data['results']},
+        )
+        self.assertTrue(
+            all(item['has_verified_access'] for item in contest_catalog.data['results'])
+        )
+        contest_answers = {
+            str(question.id): question.correct_answer
+            for question in contest.questions.order_by('order')
+        }
+        contest_reasoning = {
+            str(question.id): 'This explains the evidence-based choice.'
+            for question in contest.questions.filter(requires_reasoning=True)
+        }
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            contest_submission = client.post(
+                reverse(
+                    'contest-assessment-submit',
+                    kwargs={'attempt_id': contest_start.data['id']},
+                ),
+                {'answers': contest_answers, 'reasoning': contest_reasoning},
+                format='json',
+            )
+        self.assertEqual(contest_submission.status_code, 200)
+        self.assertEqual(contest_submission.data['score'], 100)
+
+        unchanged_output = StringIO()
+        call_command(
+            'bootstrap_apexstratos_libraries',
+            '--apply',
+            '--allow-partial',
+            '--preserve-existing-slots',
+            stdout=unchanged_output,
+            stderr=StringIO(),
+        )
+        self.assertIn('inserted=0', unchanged_output.getvalue())
+        self.assertIn('skipped_existing=1501', unchanged_output.getvalue())

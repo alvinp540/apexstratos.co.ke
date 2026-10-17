@@ -21,9 +21,22 @@ Create a Python virtual environment for the backend, install `apex_backend/requi
 python manage.py check --settings=apex_backend.settings.development
 python manage.py test apps.cohorts.tests.test_assessment_integrity --settings=apex_backend.settings.development
 python manage.py test apps.cohorts.tests.test_allocation --settings=apex_backend.settings.development
+python manage.py test apps.cohorts.tests.test_content_import --settings=apex_backend.settings.development
 ```
 
 Do not run seed, reset, flush or deletion commands against production.
+
+## Assessment Content Import Status
+
+The verified local SQLite import contains 1,504 complete assessment records and 15,040 questions across the three libraries. Nine source packs containing 656 assessments remain excluded because strict validation finds repeated prompts; those packs require meaningful content correction and revalidation. Three existing starter assessments in occupied schedule slots are preserved by the partial importer.
+
+The importer is validation-only by default. Review a local preflight report with:
+
+```powershell
+python manage.py bootstrap_apexstratos_libraries --allow-partial --preserve-existing-slots --report-json .\assessment-preflight.json --settings=apex_backend.settings.development
+```
+
+The `--apply` and `--publish` options must not be used against production without an approved deployment, a database backup, and a zero-failure content report. Never publish Medical and Health or Law and Society content before its required qualified review. Reconcile database and API inventories after any import; a successful command alone does not establish that the target library is complete or published.
 
 ## Production Configuration
 
