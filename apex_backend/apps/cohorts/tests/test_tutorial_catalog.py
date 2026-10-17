@@ -92,6 +92,26 @@ class TutorialCatalogTests(TestCase):
         self.assertEqual(str(response.data['results'][0]['id']), str(tutorial.id))
         self.assertEqual(response.data['results'][0]['week'], 5)
 
+    def test_topic_filter_searches_published_titles_and_descriptions(self):
+        tutorial = self.make_tutorial(title='Secure API boundaries')
+        self.make_tutorial(
+            week=2,
+            daily_slot=2,
+            title='Practical data modelling',
+            description='Reason about entities and their relationships.',
+        )
+
+        response = self.client.get(reverse('tutorial-list'), {'topic': 'API'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(str(response.data['results'][0]['id']), str(tutorial.id))
+
+    def test_topic_filter_rejects_overlong_search_terms(self):
+        response = self.client.get(reverse('tutorial-list'), {'topic': 'x' * 121})
+
+        self.assertEqual(response.status_code, 400)
+
     def test_tutorial_attempt_saves_progress_and_preserves_content_for_revision(self):
         tutorial = self.make_tutorial()
         scheduled_time = datetime(2026, 10, 15, 10, tzinfo=ZoneInfo('Africa/Nairobi'))

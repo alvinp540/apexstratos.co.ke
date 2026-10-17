@@ -67,7 +67,7 @@ export default function ContestPage() {
   const [contests, setContests] = useState([])
   const [libraryItems, setLibraryItems] = useState([])
   const [libraryCount, setLibraryCount] = useState(0)
-  const [libraryFilters, setLibraryFilters] = useState({ field: '', week: '' })
+  const [libraryFilters, setLibraryFilters] = useState({ field: '', week: '', topic: '' })
   const [libraryLoading, setLibraryLoading] = useState(true)
   const [libraryError, setLibraryError] = useState('')
   const [cycleStanding, setCycleStanding] = useState(null)
@@ -144,7 +144,7 @@ export default function ContestPage() {
     } finally {
       setLibraryLoading(false)
     }
-  }, [libraryFilters.field, libraryFilters.week])
+  }, [libraryFilters.field, libraryFilters.week, libraryFilters.topic])
 
   useEffect(() => { loadLibrary() }, [loadLibrary])
 
@@ -349,7 +349,7 @@ export default function ContestPage() {
     <section className="panel contest-library-panel">
       <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST LIBRARY</div><h2>KSh 100 per applicable access period</h2><p>Each published assessment contains ten questions. Payment verification grants field-specific access; the 20-minute timer starts only when the server accepts your start action during the Friday–Sunday window.</p></div><span className="contest-price">{libraryCount} matching</span></div>
       <WeeklyScheduleNotice activity="main_contest" />
-      <div className="filter-row"><label>Study area<select value={libraryFilters.field} onChange={(event) => setLibraryFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All study areas</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label><label>Week<select value={libraryFilters.week} onChange={(event) => setLibraryFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><button className="button button-quiet" onClick={loadLibrary}>↻ Refresh library</button></div>
+      <div className="filter-row"><label>Study area<select value={libraryFilters.field} onChange={(event) => setLibraryFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All study areas</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label><label>Week<select value={libraryFilters.week} onChange={(event) => setLibraryFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={libraryFilters.topic} onChange={(event) => setLibraryFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label><button className="button button-quiet" onClick={loadLibrary}>↻ Refresh library</button></div>
       {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <div className="content-grid">{libraryItems.map((assessment) => {
         const locked = !assessment.has_verified_access && assessment.attempt?.status !== 'in_progress' && assessment.attempt?.status !== 'graded'
         return <article className="tutorial-card" key={assessment.id}>

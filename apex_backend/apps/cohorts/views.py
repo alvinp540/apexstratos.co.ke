@@ -41,6 +41,7 @@ class TutorialListView(APIView):
         filters.is_valid(raise_exception=True)
         query = dict(filters.validated_data)
         library_week = query.pop('week', None)
+        topic = query.pop('topic', '').strip()
         tutorials = Tutorial.objects.filter(
             status__in=('published', 'scheduled'),
         ).annotate(question_count=Count('questions')).filter(
@@ -57,6 +58,8 @@ class TutorialListView(APIView):
             query['month'] = (library_week - 1) // 4 + 1
             query['week'] = (library_week - 1) % 4 + 1
         tutorials = tutorials.filter(**query)
+        if topic:
+            tutorials = tutorials.filter(Q(title__icontains=topic) | Q(description__icontains=topic))
         paginator = StandardResultsPagination()
         page = paginator.paginate_queryset(tutorials, request)
         return paginator.get_paginated_response(TutorialSerializer(

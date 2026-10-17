@@ -80,6 +80,43 @@ class SponsoredViewAccessTests(TestCase):
                 format='json',
             )
 
+    def test_catalog_topic_filter_and_verified_access_flag(self):
+        matching = self.client.get(
+            reverse('sponsored-view-assessment-list'),
+            {'topic': 'interface'},
+        )
+        self.assertEqual(matching.status_code, 200)
+        self.assertEqual(matching.data['count'], 1)
+        self.assertFalse(matching.data['results'][0]['has_verified_access'])
+
+        unmatched = self.client.get(
+            reverse('sponsored-view-assessment-list'),
+            {'topic': 'unrelated topic'},
+        )
+        self.assertEqual(unmatched.status_code, 200)
+        self.assertEqual(unmatched.data['count'], 0)
+
+        payment = self.create_payment('SPONSOREDREFACCESS')
+        self.assertEqual(payment.status_code, 201)
+        self.client.force_authenticate(self.admin)
+        verified = self.client.post(
+            reverse('sponsored-view-payment-admin-decision', kwargs={'payment_id': payment.data['id']}),
+            {
+                'status': 'verified',
+                'mpesa_transaction_id': 'SPONSOREDTXACCESS',
+                'verification_notes': 'Verified for library access test.',
+            },
+            format='json',
+        )
+        self.assertEqual(verified.status_code, 200)
+
+        self.client.force_authenticate(self.student)
+        unlocked = self.client.get(
+            reverse('sponsored-view-assessment-list'),
+            {'topic': 'interface'},
+        )
+        self.assertTrue(unlocked.data['results'][0]['has_verified_access'])
+
     def test_student_pays_once_admin_verifies_then_student_starts_saves_and_submits(self):
         monday = eat_datetime(2026, 10, 12, 10)
         payment_response = self.create_payment(now=monday)

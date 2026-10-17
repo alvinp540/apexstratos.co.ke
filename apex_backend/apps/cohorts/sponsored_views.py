@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -105,6 +106,9 @@ class SponsoredViewAssessmentListView(APIView):
     def get(self, request):
         field = request.query_params.get('field')
         week = request.query_params.get('week')
+        topic = serializers.CharField(max_length=120, allow_blank=True).run_validation(
+            request.query_params.get('topic', ''),
+        ).strip()
         assessments = SponsoredViewAssessment.objects.filter(status='published').prefetch_related(
             'questions',
             'payments',
@@ -121,6 +125,8 @@ class SponsoredViewAssessmentListView(APIView):
             if not 1 <= week_number <= 8:
                 raise serializers.ValidationError({'week': 'Week must be from 1 through 8.'})
             assessments = assessments.filter(week=week_number)
+        if topic:
+            assessments = assessments.filter(Q(title__icontains=topic) | Q(description__icontains=topic))
 
         now = timezone.now()
         window = activity_window('sponsored_view', now)
@@ -152,6 +158,7 @@ class SponsoredViewAssessmentListView(APIView):
                 'question_count': 10,
                 'duration_minutes': assessment.duration_minutes,
                 'access_price_kes': 20,
+                'has_verified_access': bool(verified_payment),
                 'can_start': bool(window and verified_payment),
                 'window_closes_at': window[1] if window else None,
                 'next_opening_at': None if window else next_opening('sponsored_view', now),

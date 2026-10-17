@@ -3,6 +3,7 @@ from collections import defaultdict
 from datetime import datetime, time, timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -479,10 +480,18 @@ class ContestLibraryView(APIView):
                 raise serializers.ValidationError({'week': 'Week must be between 1 and 8.'})
             filters['month'] = (library_week - 1) // 4 + 1
             filters['week'] = (library_week - 1) % 4 + 1
+        topic = serializers.CharField(max_length=120, allow_blank=True).run_validation(
+            request.query_params.get('topic', ''),
+        ).strip()
 
-        assessments = list(AssessmentSchedule.objects.filter(
+        assessments_query = AssessmentSchedule.objects.filter(
             status__in=('published', 'scheduled'),
-        ).filter(**filters).prefetch_related('questions').order_by(
+        ).filter(**filters)
+        if topic:
+            assessments_query = assessments_query.filter(
+                Q(title__icontains=topic) | Q(description__icontains=topic),
+            )
+        assessments = list(assessments_query.prefetch_related('questions').order_by(
             'month', 'week', 'field', 'day', 'assessment_slot',
         ))
         now = timezone.now()

@@ -8,6 +8,7 @@
 - Migrations: Django migrations, applied with `python manage.py migrate` only after a production backup and migration review.
 - Existing process declaration: `apex_backend/Procfile` defines Daphne and a Celery worker. It does not establish that Pinnacle/cPanel supports Procfiles, Daphne, Redis or persistent workers.
 - Frontend API: `/api/v1` by default. WebSockets use same-origin `ws:`/`wss:` unless `VITE_WS_BASE_URL` is set.
+- Local Vite proxy: copy `apex_frontend/.env.example` to `.env`; set `VITE_DEV_API_TARGET` and `VITE_DEV_WS_TARGET` to the local backend. These proxy values are used only by the Vite development server. Set `VITE_API_BASE_URL` and, if needed, `VITE_WS_BASE_URL` to the production API origins in the production build environment; do not ship local `.env` files.
 - Recovery repository: `https://github.com/fiddle254/Apex-loading.git`. Confirm the hosting deployment integration before deploying.
 
 ## Local Validation

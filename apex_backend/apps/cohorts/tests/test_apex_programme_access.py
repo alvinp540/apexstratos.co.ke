@@ -176,6 +176,18 @@ class MainContestAccessTests(APITestCase):
         self.assertNotIn('video_url', assessment)
         self.assertNotIn('correct_answer', assessment)
 
+    def test_library_topic_filter_searches_title_and_description(self):
+        assessment = self.make_published_assessment()
+
+        response = self.client.get(
+            reverse('contest-assessment-library'),
+            {'topic': 'API design'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], str(assessment.id))
+
     def test_library_marks_field_access_only_after_payment_is_verified(self):
         self.make_published_assessment()
         friday = timezone.make_aware(

@@ -135,6 +135,7 @@ class TutorialQuerySerializer(serializers.Serializer):
     week = serializers.IntegerField(required=False, min_value=1, max_value=8)
     day = serializers.IntegerField(required=False, min_value=0, max_value=3)
     field = serializers.ChoiceField(required=False, choices=Tutorial.FIELD_CHOICES)
+    topic = serializers.CharField(required=False, max_length=120, allow_blank=True)
 
 
 class AssessmentSerializer(serializers.ModelSerializer):

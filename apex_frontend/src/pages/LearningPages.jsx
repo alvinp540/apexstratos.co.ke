@@ -24,14 +24,15 @@ export function StudyAreas() {
 }
 
 export function Tutorials() {
-  const [params, setParams] = useState({ field: '', month: '', week: '' })
+  const [params, setParams] = useState({ field: '', month: '', week: '', topic: '' })
+  const [page, setPage] = useState(1)
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [status, setStatus] = useState({ loading: true, error: '' })
   const load = async () => {
     setStatus({ loading: true, error: '' })
     try {
-      const query = Object.fromEntries(Object.entries(params).filter(([, value]) => value))
+      const query = Object.fromEntries(Object.entries({ ...params, page }).filter(([, value]) => value))
       const { data } = await api.get('/cohorts/tutorials/', { params: query })
       setItems(unwrapList(data))
       setTotal(data?.count ?? unwrapList(data).length)
@@ -41,13 +42,17 @@ export function Tutorials() {
     }
     setStatus({ loading: false, error: '' })
   }
-  useEffect(() => { load() }, [params.field, params.month, params.week])
-  const update = (event) => setParams({ ...params, [event.target.name]: event.target.value })
+  useEffect(() => { load() }, [params.field, params.month, params.week, params.topic, page])
+  const update = (event) => {
+    setParams({ ...params, [event.target.name]: event.target.value })
+    setPage(1)
+  }
+  const pageCount = Math.max(1, Math.ceil(total / 20))
   return <Page eyebrow="LEARNING LIBRARY" title="Tutorial Library" description="Free written lessons and ten-question assessments, organized by study area and week.">
     <WeeklyScheduleNotice activity="tutorials" />
     <div className="library-summary"><strong>Free</strong><span>{total} matching published assessments · initial target 640 assessments / 6,400 questions</span></div>
-    <div className="filter-row"><label>Study area<select name="field" value={params.field} onChange={update}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={params.week} onChange={update}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label></div>
-    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorial assessments match these filters">The database currently has no published tutorial assessments for this selection.</Empty> : <div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div>}
+    <div className="filter-row"><label>Study area<select name="field" value={params.field} onChange={update}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={params.week} onChange={update}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input name="topic" maxLength={120} value={params.topic} onChange={update} placeholder="Search titles and descriptions" /></label></div>
+    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorial assessments match these filters">The database currently has no published tutorial assessments for this selection.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><div className="filter-row library-pagination"><span>Page {page} of {pageCount} · {total} assessments</span><button className="button button-quiet" disabled={page <= 1 || status.loading} onClick={() => setPage((current) => current - 1)}>Previous</button><button className="button button-quiet" disabled={page >= pageCount || status.loading} onClick={() => setPage((current) => current + 1)}>Next</button></div></>}
   </Page>
 }
 
@@ -56,21 +61,26 @@ export function AreaTutorials() {
   const field = decodeURIComponent(area || '')
   const [items, setItems] = useState([])
   const [week, setWeek] = useState('')
+  const [topic, setTopic] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
   const [status, setStatus] = useState({ loading: true, error: '' })
   const load = async () => {
     setStatus({ loading: true, error: '' })
     try {
-      const { data } = await api.get('/cohorts/tutorials/', { params: { field, ...(week ? { week } : {}) } })
+      const { data } = await api.get('/cohorts/tutorials/', { params: { field, page, ...(week ? { week } : {}), ...(topic ? { topic } : {}) } })
       setItems(unwrapList(data))
+      setTotal(data?.count ?? unwrapList(data).length)
       setStatus({ loading: false, error: '' })
     } catch (error) { setStatus({ loading: false, error: getErrorMessage(error) }) }
   }
-  useEffect(() => { load() }, [field, week])
+  useEffect(() => { load() }, [field, week, topic, page])
+  const pageCount = Math.max(1, Math.ceil(total / 20))
   return <Page eyebrow="STUDY AREA" title={field} description="Published lessons available for this discipline.">
     <WeeklyScheduleNotice activity="tutorials" />
     <Link className="back-link inline-back" to="/study">← All study areas</Link>
-    <div className="filter-row"><label>Week<select value={week} onChange={(event) => setWeek(event.target.value)}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label></div>
-    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published tutorial assessments match this selection">The database currently has no published tutorial assessments for {field}.</Empty> : <div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div>}
+    <div className="filter-row"><label>Week<select value={week} onChange={(event) => { setWeek(event.target.value); setPage(1) }}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={topic} onChange={(event) => { setTopic(event.target.value); setPage(1) }} placeholder="Search titles and descriptions" /></label></div>
+    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published tutorial assessments match this selection">The database currently has no published tutorial assessments for {field}.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><div className="filter-row library-pagination"><span>Page {page} of {pageCount} · {total} assessments</span><button className="button button-quiet" disabled={page <= 1 || status.loading} onClick={() => setPage((current) => current - 1)}>Previous</button><button className="button button-quiet" disabled={page >= pageCount || status.loading} onClick={() => setPage((current) => current + 1)}>Next</button></div></>}
   </Page>
 }
 
@@ -383,7 +393,7 @@ function SupportApplicationReview({ application, busy, onReview }) {
 
 export function SponsoredView() {
   const { user } = useAuth()
-  const [filters, setFilters] = useState({ field: '', week: '' })
+  const [filters, setFilters] = useState({ field: '', week: '', topic: '' })
   const [assessments, setAssessments] = useState([])
   const [payments, setPayments] = useState([])
   const [adminPayments, setAdminPayments] = useState([])
@@ -424,7 +434,7 @@ export function SponsoredView() {
       setStatus({ loading: false, error: getErrorMessage(requestError) })
     }
   }
-  useEffect(() => { load() }, [filters.field, filters.week, isAdmin])
+  useEffect(() => { load() }, [filters.field, filters.week, filters.topic, isAdmin])
 
   useEffect(() => {
     if (!attempt?.deadline_at || !attempt?.server_time || attempt.status !== 'in_progress') {
@@ -534,7 +544,7 @@ export function SponsoredView() {
   return <Page eyebrow="SPONSORED VIEW" title="Sponsored View Library" description="KSh 20 per attempt. Results and any reward remain subject to published rules, validation, funding, and approval.">
     <WeeklyScheduleNotice activity="sponsored_view" />
     <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Maximum five paid attempts per student per day, Monday–Thursday · 10 questions per assessment · target 800 assessments / 8,000 questions</span></div>
-    <div className="filter-row"><label>Study area<select name="field" value={filters.field} onChange={(event) => setFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={filters.week} onChange={(event) => setFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label></div>
+    <div className="filter-row"><label>Study area<select name="field" value={filters.field} onChange={(event) => setFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={filters.week} onChange={(event) => setFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={filters.topic} onChange={(event) => setFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {status.loading ? <Loading label="Finding published Sponsored View assessments…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : assessments.length === 0 ? <Empty title="No complete, published Sponsored View assessments match these filters">No approved assessment content is currently available for this selection. The published content count is zero; no placeholder assessments are shown.</Empty> : <div className="content-grid">{assessments.map((assessment) => {
       const assessmentPayments = payments.filter((item) => item.assessment_id === assessment.id)
@@ -544,7 +554,7 @@ export function SponsoredView() {
         || assessmentPayments.find((item) => item.status === 'verified')
         || pendingPayment
         || assessmentPayments[0]
-      const locked = !assessmentPayments.some((item) => item.status === 'verified')
+      const locked = !assessment.has_verified_access
       const canRequestAnother = !pendingPayment && (
         !payment
         || payment.status === 'rejected'
