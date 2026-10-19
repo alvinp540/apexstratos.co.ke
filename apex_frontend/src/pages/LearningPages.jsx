@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import api, { getErrorMessage, unwrapList } from '../api/client'
 import { studyAreas } from '../data'
@@ -29,7 +29,7 @@ export function Tutorials() {
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [status, setStatus] = useState({ loading: true, error: '' })
-  const load = async () => {
+  const load = useCallback(async () => {
     setStatus({ loading: true, error: '' })
     try {
       const query = Object.fromEntries(Object.entries({ ...params, page }).filter(([, value]) => value))
@@ -41,8 +41,8 @@ export function Tutorials() {
       return
     }
     setStatus({ loading: false, error: '' })
-  }
-  useEffect(() => { load() }, [params.field, params.month, params.week, params.topic, page])
+  }, [page, params])
+  useEffect(() => { load() }, [load])
   const update = (event) => {
     setParams({ ...params, [event.target.name]: event.target.value })
     setPage(1)
@@ -64,7 +64,7 @@ export function AreaTutorials() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [status, setStatus] = useState({ loading: true, error: '' })
-  const load = async () => {
+  const load = useCallback(async () => {
     setStatus({ loading: true, error: '' })
     try {
       const { data } = await api.get('/cohorts/tutorials/', { params: { field, page, ...(week ? { week } : {}), ...(topic ? { topic } : {}) } })
@@ -72,8 +72,8 @@ export function AreaTutorials() {
       setTotal(data?.count ?? unwrapList(data).length)
       setStatus({ loading: false, error: '' })
     } catch (error) { setStatus({ loading: false, error: getErrorMessage(error) }) }
-  }
-  useEffect(() => { load() }, [field, week, topic, page])
+  }, [field, page, topic, week])
+  useEffect(() => { load() }, [load])
   return <Page eyebrow="STUDY AREA" title={field} description="Published lessons available for this discipline.">
     <WeeklyScheduleNotice activity="tutorials" />
     <Link className="back-link inline-back" to="/study">← All study areas</Link>
@@ -90,11 +90,11 @@ export function TutorialDetail() {
   const { id } = useParams()
   const [item, setItem] = useState(null)
   const [status, setStatus] = useState({ loading: true, error: '' })
-  const load = () => {
+  const load = useCallback(() => {
     setStatus({ loading: true, error: '' })
     api.get(`/cohorts/tutorials/${id}/`).then(({ data }) => { setItem(data); setStatus({ loading: false, error: '' }) }).catch((error) => setStatus({ loading: false, error: getErrorMessage(error) }))
-  }
-  useEffect(() => { load() }, [id])
+  }, [id])
+  useEffect(() => { load() }, [load])
   if (status.loading) return <Page eyebrow="TUTORIAL" title="Loading lesson"><Loading /></Page>
   if (status.error) return <Page eyebrow="TUTORIAL" title="Lesson unavailable"><ErrorState message={status.error} retry={load} /></Page>
   if (!item) return <Page eyebrow="TUTORIAL" title="Lesson unavailable"><Empty /></Page>
@@ -129,7 +129,7 @@ function TutorialAssessment({ tutorial, onComplete }) {
       setAnswers(tutorial.current_attempt.answers || {})
       setReasoning(tutorial.current_attempt.reasoning || {})
     }
-  }, [tutorial.current_attempt?.id, attempt?.id])
+  }, [tutorial.current_attempt, attempt?.id])
 
   useEffect(() => {
     if (!attempt?.deadline_at || !attempt?.server_time || attempt.status !== 'in_progress') {
@@ -232,11 +232,11 @@ export function Opportunities() {
   const [informationForms, setInformationForms] = useState({})
   const [busyId, setBusyId] = useState('')
   const [formError, setFormError] = useState('')
-  const loadJobs = () => {
+  const loadJobs = useCallback(() => {
     setStatus({ loading: true, error: '' })
     api.get('/vendor/opportunities/').then(({ data }) => { setJobs(unwrapList(data)); setStatus({ loading: false, error: '' }) }).catch((error) => setStatus({ loading: false, error: getErrorMessage(error) }))
-  }
-  const loadSupport = async () => {
+  }, [])
+  const loadSupport = useCallback(async () => {
     setSupportStatus({ loading: true, error: '' })
     try {
       const [programResult, applicationResult] = await Promise.all([
@@ -258,8 +258,8 @@ export function Opportunities() {
         setAdminError(getErrorMessage(error))
       }
     }
-  }
-  useEffect(() => { loadJobs(); loadSupport() }, [user?.is_admin])
+  }, [user?.is_admin])
+  useEffect(() => { loadJobs(); loadSupport() }, [loadJobs, loadSupport])
 
   const updateForm = (programId, key, value) => {
     setForms((current) => ({
@@ -408,7 +408,7 @@ export function SponsoredView() {
   const [status, setStatus] = useState({ loading: true, error: '' })
   const isAdmin = user?.role === 'admin' || user?.is_admin
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setStatus({ loading: true, error: '' })
     try {
       const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value))
@@ -431,8 +431,8 @@ export function SponsoredView() {
     } catch (requestError) {
       setStatus({ loading: false, error: getErrorMessage(requestError) })
     }
-  }
-  useEffect(() => { load() }, [filters.field, filters.week, filters.topic, isAdmin])
+  }, [filters, isAdmin])
+  useEffect(() => { load() }, [load])
 
   useEffect(() => {
     if (!attempt?.deadline_at || !attempt?.server_time || attempt.status !== 'in_progress') {

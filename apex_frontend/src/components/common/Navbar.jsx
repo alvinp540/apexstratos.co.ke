@@ -13,7 +13,8 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!user) return undefined
-    const syncPresence = () => sendPresence(document.visibilityState === 'visible' && navigator.onLine).catch(() => {})
+    const syncPresence = () => sendPresence(document.visibilityState === 'visible' && navigator.onLine)
+      .catch((error) => console.error('Presence update failed.', error))
     syncPresence()
     const timer = window.setInterval(syncPresence, 30000)
     window.addEventListener('online', syncPresence)
@@ -24,14 +25,16 @@ export default function Navbar() {
       window.removeEventListener('online', syncPresence)
       window.removeEventListener('offline', syncPresence)
       document.removeEventListener('visibilitychange', syncPresence)
-      sendPresence(false).catch(() => {})
+      sendPresence(false).catch((error) => console.error('Presence disconnect update failed.', error))
     }
   }, [user])
 
   const handleLogout = async () => {
     try {
       await logoutApi(localStorage.getItem('refresh_token'))
-    } catch {}
+    } catch (error) {
+      console.error('Logout request failed; clearing the local session.', error)
+    }
     logout()
     navigate('/login')
   }

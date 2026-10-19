@@ -32,7 +32,7 @@ function contestDay(value) {
 function useContestCountdown(attempt, onExpire) {
   const [remaining, setRemaining] = useState(null)
   useEffect(() => {
-    if (!attempt) {
+    if (!attempt?.id) {
       setRemaining(null)
       return undefined
     }
@@ -135,7 +135,13 @@ export default function ContestPage() {
     setLibraryLoading(true)
     setLibraryError('')
     try {
-      const params = Object.fromEntries(Object.entries(libraryFilters).filter(([, value]) => value))
+      const params = Object.fromEntries(
+        Object.entries({
+          field: libraryFilters.field,
+          week: libraryFilters.week,
+          topic: libraryFilters.topic,
+        }).filter(([, value]) => value),
+      )
       const { data } = await getMainContestLibrary(params)
       setLibraryItems(unwrapList(data))
       setLibraryCount(data?.count ?? unwrapList(data).length)
@@ -204,10 +210,12 @@ export default function ContestPage() {
 
   const timer = useContestCountdown(activeAttempt, expireAttempt)
 
+  const activeAttemptId = activeAttempt?.id
+  const activeAttemptStatus = activeAttempt?.status
   useEffect(() => {
-    if (!activeAttempt || activeAttempt.status !== 'in_progress' || submitting) return undefined
+    if (!activeAttemptId || activeAttemptStatus !== 'in_progress' || submitting) return undefined
     const saveTimer = window.setTimeout(() => {
-      saveMainContestAttemptAnswers(activeAttempt.id, answers, reasoning)
+      saveMainContestAttemptAnswers(activeAttemptId, answers, reasoning)
         .catch((error) => {
           if (![409, 410].includes(error.response?.status)) {
             setErrors((current) => ({ ...current, attempt: getErrorMessage(error) }))
@@ -215,7 +223,7 @@ export default function ContestPage() {
         })
     }, 500)
     return () => window.clearTimeout(saveTimer)
-  }, [activeAttempt?.id, activeAttempt?.status, answers, reasoning, submitting])
+  }, [activeAttemptId, activeAttemptStatus, answers, reasoning, submitting])
 
   const openAttempt = (assessment, attempt) => {
     if (!attempt?.id || !attempt.deadline_at || !attempt.server_time) {

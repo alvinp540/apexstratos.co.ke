@@ -1,17 +1,32 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+
+function getRemainingSeconds(startedAt, limitMinutes) {
+  const deadline = new Date(startedAt).getTime() + limitMinutes * 60000
+  return Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+}
 
 export default function AssessmentTimer({ limitMinutes, startedAt, onExpire }) {
-  const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil((new Date(startedAt).getTime() + limitMinutes * 60000 - Date.now()) / 1000)))
+  const [remaining, setRemaining] = useState(() => getRemainingSeconds(startedAt, limitMinutes))
+  const onExpireRef = useRef(onExpire)
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setRemaining((prev) => {
-        if (prev <= 1) { clearInterval(id); onExpire?.(); return 0 }
-        return prev - 1
-      })
-    }, 1000)
-    return () => clearInterval(id)
-  }, []) // eslint-disable-line
+    onExpireRef.current = onExpire
+  }, [onExpire])
+
+  useEffect(() => {
+    let expired = false
+    const update = () => {
+      const next = getRemainingSeconds(startedAt, limitMinutes)
+      setRemaining(next)
+      if (next === 0 && !expired) {
+        expired = true
+        onExpireRef.current?.()
+      }
+    }
+    update()
+    const id = window.setInterval(update, 1000)
+    return () => window.clearInterval(id)
+  }, [limitMinutes, startedAt])
 
   const mins = String(Math.floor(remaining / 60)).padStart(2, '0')
   const secs = String(remaining % 60).padStart(2, '0')

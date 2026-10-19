@@ -2,7 +2,7 @@ import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { register as registerApi } from '../../api/authAPI'
-import { email, required, passwordStrength, minLength } from '../../utils/validators'
+import { email, required, passwordStrength } from '../../utils/validators'
 
 export default function RegisterForm() {
   const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm()

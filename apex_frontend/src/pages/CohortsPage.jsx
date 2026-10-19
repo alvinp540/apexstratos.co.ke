@@ -102,35 +102,6 @@ export default function CohortsPage() {
 
   if (loading) return <><Navbar /><LoadingSpinner /></>
 
-  const demoAssessment = {
-    title: 'Cohort Assessment',
-    time_limit_minutes: 15,
-    questions: [
-      {
-        id: 'q1',
-        text: 'The API endpoint /user/123 is returning an error. What is the MOST likely cause?',
-        points: 1,
-        options: [
-          { id: 'a', text: 'Database connection is failing.' },
-          { id: 'b', text: 'The getUser function is not exported properly.' },
-          { id: 'c', text: 'The route path is incorrect.' },
-          { id: 'd', text: 'User ID is not being passed in the request.' },
-        ],
-      },
-      {
-        id: 'q2',
-        text: 'Why is Option B the best solution?',
-        points: 1,
-        options: [
-          { id: 'a', text: 'Because the function is not available outside the file.' },
-          { id: 'b', text: 'Because it logs to console and improves debugging.' },
-          { id: 'c', text: 'Because the database schema is not correct.' },
-          { id: 'd', text: 'Because the request headers are missing authorization.' },
-        ],
-      },
-    ],
-  }
-
   return (
     <>
       <Navbar />
@@ -230,7 +201,7 @@ export default function CohortsPage() {
               <p style={{ color: 'var(--color-warning)', marginTop: '0.6rem' }}>Stay in a quiet place. Tab switches, unusual timing, and copied answers are recorded and may result in a zero score.</p>
             </div>
 
-            {(activeAttempt.question_order || []).map((questionId, index) => activeAssessment.questions.find((q) => String(q.id) === questionId)).filter(Boolean).map((q, index) => (
+            {(activeAttempt.question_order || []).map((questionId) => activeAssessment.questions.find((q) => String(q.id) === questionId)).filter(Boolean).map((q, index) => (
               <QuestionCard key={q.id || index} question={q} index={index} selected={answers[q.id || index]} onSelect={(qId, val) => setAnswers((prev) => ({ ...prev, [qId]: val }))} />
             ))}
 

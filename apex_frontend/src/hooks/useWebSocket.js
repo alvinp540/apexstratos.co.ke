@@ -11,14 +11,17 @@ export function useWebSocket(url, onMessage) {
     wsRef.current = ws
 
     ws.onmessage = (e) => {
-      try { onMessage(JSON.parse(e.data)) } catch {}
+      try {
+        onMessage(JSON.parse(e.data))
+      } catch (error) {
+        console.error('Could not process a notification websocket message.', error)
+      }
     }
 
-    ws.onerror = () => {}
-    ws.onclose = () => {}
+    ws.onerror = () => console.error('Notification websocket connection failed.')
 
     return () => { ws.close() }
-  }, [url]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onMessage, url])
 
   return wsRef
 }

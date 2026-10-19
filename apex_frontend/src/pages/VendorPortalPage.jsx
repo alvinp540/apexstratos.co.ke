@@ -22,7 +22,12 @@ export default function VendorPortalPage() {
       const [jobsRes, statsRes] = await Promise.all([getVendorJobs(), getVendorDashboard()])
       setJobs(jobsRes.data)
       setStats(statsRes.data)
-    } catch {} finally { setLoading(false) }
+    } catch (error) {
+      console.error('Could not load vendor dashboard.', error)
+      toast.error(error.response?.data?.detail || 'Could not load vendor dashboard.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { loadData() }, [])
@@ -32,7 +37,9 @@ export default function VendorPortalPage() {
       await publishJob(jobId)
       toast.success('Job published! Routing initiated.')
       loadData()
-    } catch { toast.error('Publish failed.') }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Publish failed.')
+    }
   }
 
   const STATUS_COLORS = { draft: '#94a3b8', open: 'var(--color-success)', matched: 'var(--color-warning)', in_progress: 'var(--color-primary)', completed: 'var(--color-accent)', cancelled: 'var(--color-error)' }

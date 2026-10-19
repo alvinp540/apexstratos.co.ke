@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import api, { getErrorMessage, unwrapList } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { studyAreas } from '../data'
 import { Loading } from '../components/States'
 import Page from '../components/Page'
-import { applyForSupportProgram, getSupportApplications, submitSupportApplicationInformation } from '../api/cohortAPI'
+import { applyForSupportProgram, submitSupportApplicationInformation } from '../api/cohortAPI'
 import SupportApplicationFields from '../components/SupportApplicationFields'
 
 export function Landing() {
@@ -84,7 +84,7 @@ export function Dashboard() {
     try { return window.localStorage.getItem(guideStorageKey) !== 'true' }
     catch { return true }
   })
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true)
     const requests = [
       ['profile', '/profiles/'], ['merit', '/trust/score/'],
@@ -101,9 +101,9 @@ export function Dashboard() {
       setData(Object.fromEntries(results.map(([key, value]) => [key, value])))
       setErrors(Object.fromEntries(results.filter(([, , error]) => error).map(([key, , error]) => [key, error])))
     }).finally(() => setLoading(false))
-  }
-  useEffect(() => { load() }, [])
-  const loadGuideData = async () => {
+  }, [user?.role])
+  useEffect(() => { load() }, [load])
+  const loadGuideData = useCallback(async () => {
     const requests = [
       ['ranking', '/rankings/me/'],
       ['contestRanking', '/cohorts/contests/leaderboard/me/'],
@@ -125,8 +125,8 @@ export function Dashboard() {
       applications: unwrapList(values.applications),
       errors: Object.fromEntries(results.filter(([, , error]) => error).map(([key, , error]) => [key, error])),
     })
-  }
-  useEffect(() => { loadGuideData() }, [])
+  }, [])
+  useEffect(() => { loadGuideData() }, [loadGuideData])
   const submitSupportApplication = async (event, program) => {
     event.preventDefault()
     setSupportBusy(program.id)
@@ -146,23 +146,23 @@ export function Dashboard() {
     } finally {
       setSupportBusy('')
     }
-    const submitApplicationInformation = async (event, application) => {
-      event.preventDefault()
-      setSupportBusy(application.id)
-      setSupportError('')
-      try {
-        const values = applicationInfoForms[application.id] || {}
-        await submitSupportApplicationInformation(application.id, {
-          mpesa_number: values.mpesa_number || application.mpesa_number,
-          application_data: values.application_data || application.application_data || {},
-        })
-        setApplicationInfoForms((current) => ({ ...current, [application.id]: {} }))
-        await loadGuideData()
-      } catch (error) {
-        setSupportError(getErrorMessage(error))
-      } finally {
-        setSupportBusy('')
-      }
+  }
+  const submitApplicationInformation = async (event, application) => {
+    event.preventDefault()
+    setSupportBusy(application.id)
+    setSupportError('')
+    try {
+      const values = applicationInfoForms[application.id] || {}
+      await submitSupportApplicationInformation(application.id, {
+        mpesa_number: values.mpesa_number || application.mpesa_number,
+        application_data: values.application_data || application.application_data || {},
+      })
+      setApplicationInfoForms((current) => ({ ...current, [application.id]: {} }))
+      await loadGuideData()
+    } catch (error) {
+      setSupportError(getErrorMessage(error))
+    } finally {
+      setSupportBusy('')
     }
   }
   const dismissGuide = () => {

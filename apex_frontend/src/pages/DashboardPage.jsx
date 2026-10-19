@@ -10,10 +10,12 @@ import { getMyRanking } from '../api/rankingAPI'
 import { getProfessionalAnalytics } from '../api/analyticsAPI'
 import api from '../api/axiosInstance'
 import SocialFeed from '../components/dashboard/SocialFeed'
+import toast from 'react-hot-toast'
 
 export default function DashboardPage() {
   const { user } = useAuth()
   const [dashboardData, setDashboardData] = useState(null)
+  const [dailyCohorts, setDailyCohorts] = useState([])
 
   useEffect(() => {
     Promise.all([
@@ -24,7 +26,10 @@ export default function DashboardPage() {
       api.get('/trust/score/history/'),
     ]).then(([profile, ranking, analytics, score, history]) => {
       setDashboardData({ profile: profile.data, ranking: ranking.data, analytics: analytics.data, score: score.data, history: history.data })
-    }).catch(() => {})
+    }).catch((error) => {
+      console.error('Could not load dashboard data.', error)
+      toast.error('Could not load all dashboard information.')
+    })
 
     // fetch up to 6 daily available cohorts
     import('../api/cohortAPI').then(({ getDailyCohorts }) => {
@@ -48,8 +53,6 @@ export default function DashboardPage() {
     { label: 'Jobs Completed', value: analytics?.jobs_completed ?? '—' },
     { label: 'Average Score', value: analytics ? `${Number(analytics.avg_score || 0).toFixed(1)}%` : '—' },
   ]
-  const [dailyCohorts, setDailyCohorts] = useState([])
-
   const metricCards = [
     { title: 'Merit Score', value: score ? Number(score.overall_merit_score).toFixed(0) : '—', delta: scoreDelta >= 0 ? `+${scoreDelta.toFixed(0)}` : scoreDelta.toFixed(0), color: '#8b5cf6' },
     { title: 'Average Assessment', value: analytics ? `${Number(analytics.avg_score || 0).toFixed(1)}%` : '—', delta: analytics ? `${analytics.total_assessments} taken` : '—', color: '#22c55e' },

@@ -14,17 +14,20 @@ export function NotificationProvider({ children }) {
     ? `${import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'}/ws/notifications/`
     : null
 
-  useWebSocket(wsUrl, (msg) => {
+  const handleRealtimeNotification = useCallback((msg) => {
     setRealtimeNotif(msg)
     setUnreadCount((c) => c + 1)
-  })
+  }, [])
+  useWebSocket(wsUrl, handleRealtimeNotification)
 
   const refreshCount = useCallback(async () => {
     if (!user) return
     try {
       const { data } = await getUnreadCount()
       setUnreadCount(data.unread_count)
-    } catch {}
+    } catch (error) {
+      console.error('Could not refresh notification count.', error)
+    }
   }, [user])
 
   useEffect(() => { refreshCount() }, [refreshCount])

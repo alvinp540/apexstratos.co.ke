@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import api from '../../api/pspAPI'
 import toast from 'react-hot-toast'
 
@@ -9,16 +9,16 @@ export default function PSPRegistrations() {
   const [loading, setLoading] = useState(false)
   const [verifyPayload, setVerifyPayload] = useState({ amount_received: '', payment_reference: '', notes: '' })
 
-  const fetch = async () => {
+  const fetch = useCallback(async () => {
     setLoading(true)
     try {
       const data = await api.listPSPRegistrations({ q: query })
       setRegistrations(data)
     } catch (e) { console.error(e); toast.error('Failed to fetch') }
     setLoading(false)
-  }
+  }, [query])
 
-  useEffect(() => { fetch() }, [])
+  useEffect(() => { fetch() }, [fetch])
 
   const open = async (reg) => {
     try {
