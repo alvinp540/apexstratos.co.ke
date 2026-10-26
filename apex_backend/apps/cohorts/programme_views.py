@@ -434,6 +434,8 @@ class ContestAssessmentListView(APIView):
         assessments = AssessmentSchedule.objects.filter(
             status__in=('published', 'scheduled'),
         ).prefetch_related('questions').order_by('field', 'day', 'assessment_slot')
+        from apps.vendor.campaign_views import contest_sponsor_attributions
+        sponsorships = contest_sponsor_attributions(assessments)
 
         results = []
         for assessment in assessments:
@@ -456,6 +458,7 @@ class ContestAssessmentListView(APIView):
                 'window_closes_at': window[1] if window else None,
                 'next_opening_at': None if window else weekly_next_opening('main_contest', now),
                 'attempt': _attempt_response(attempt) if attempt else None,
+                'sponsorships': sponsorships.get(str(assessment.id), []),
             })
         return Response(results)
 
@@ -494,6 +497,8 @@ class ContestLibraryView(APIView):
         assessments = list(assessments_query.prefetch_related('questions').order_by(
             'month', 'week', 'field', 'day', 'assessment_slot',
         ))
+        from apps.vendor.campaign_views import contest_sponsor_attributions
+        sponsorships = contest_sponsor_attributions(assessments)
         now = timezone.now()
         window = activity_window('main_contest', now)
         entitlement_fields = set(ParticipationPayment.objects.filter(
@@ -531,6 +536,7 @@ class ContestLibraryView(APIView):
                 'window_closes_at': window[1] if window else None,
                 'next_opening_at': None if window else weekly_next_opening('main_contest', now),
                 'attempt': _attempt_response(attempt) if attempt else None,
+                'sponsorships': sponsorships.get(str(assessment.id), []),
             })
         return Response({'count': len(results), 'results': results})
 
@@ -778,6 +784,8 @@ class SubmitContestAssessmentView(APIView):
             attempt.save(update_fields=(
                 'answers', 'submitted_at', 'status', 'ip_address', 'score',
             ))
+            from apps.vendor.campaign_views import record_contest_campaign_event
+            record_contest_campaign_event(attempt.user, attempt.assessment)
             from .support_views import sync_support_eligibilities_for_user
             sync_support_eligibilities_for_user(attempt.user)
 

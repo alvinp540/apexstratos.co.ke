@@ -11,6 +11,18 @@ class IsVendor(BasePermission):
         return request.user.is_authenticated and request.user.role == 'vendor'
 
 
+class IsApprovedVendor(BasePermission):
+    message = 'An approved vendor profile is required for this action.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        return (
+            user.is_authenticated
+            and user.role == 'vendor'
+            and getattr(getattr(user, 'vendor_profile', None), 'status', None) == 'approved'
+        )
+
+
 class IsProfessional(BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role == 'professional'

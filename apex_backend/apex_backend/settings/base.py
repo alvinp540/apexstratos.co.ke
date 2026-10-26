@@ -1,6 +1,7 @@
 from datetime import timedelta
 from pathlib import Path
 import os
+import dj_database_url
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -77,8 +78,17 @@ ASGI_APPLICATION = 'apex_backend.asgi.application'
 
 AUTH_USER_MODEL = 'accounts.User'
 
+_database_url = os.environ.get('DATABASE_URL', '')
 _db_name = os.environ.get('DB_NAME', '')
-if _db_name:
+if _database_url:
+    DATABASES = {
+        'default': dj_database_url.parse(
+            _database_url,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+elif _db_name:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
@@ -157,7 +167,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Email
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
-EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT') or 587)
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
@@ -186,3 +196,5 @@ WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v20.0')
 
 PLATFORM_FEE_PERCENT = float(os.environ.get('PLATFORM_FEE_PERCENT', 10))
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')

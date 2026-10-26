@@ -108,6 +108,7 @@ export function TutorialDetail() {
   return <Page eyebrow={item.field} title={item.title} description={item.description}>
     <Link className="back-link inline-back" to={`/study/${encodeURIComponent(item.field)}`}>← Back to {item.field}</Link>
     <div className="lesson-meta"><span className="tag">{item.difficulty}</span><span>Week {item.week}</span><span>Free · 10 questions</span>{item.progress?.completed && <span>Completed · best score {item.progress.best_score}%</span>}</div>
+    {item.sponsorships?.length > 0 && <aside className="panel vendor-campaign-disclosure"><strong>Sponsored learning disclosure</strong>{item.sponsorships.map((sponsorship) => <p key={sponsorship.campaign_id}>{sponsorship.disclosure} Sponsor: {sponsorship.sponsor_name}. Sponsorship does not affect this lesson's assessment answers, scoring, or merit.</p>)}</aside>}
     {item.learning_objectives?.length > 0 && <section className="lesson-section"><div className="eyebrow">LEARNING OBJECTIVES</div><ul>{item.learning_objectives.map((objective, index) => <li key={`${index}-${objective}`}>{objective}</li>)}</ul></section>}
     {sections.length > 0 && <div className="lesson-sections">{sections.map(([heading, content]) => <section className="lesson-section" key={heading}><h2>{heading}</h2><p>{content}</p></section>)}</div>}
     <WeeklyScheduleNotice activity="tutorials" />

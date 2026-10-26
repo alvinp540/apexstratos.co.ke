@@ -14,8 +14,8 @@ CHANNEL_LAYERS = {
     }
 }
 
-# Use SQLite if MySQL credentials are not configured
-if not os.environ.get('DB_NAME'):
+# Use SQLite only when neither PostgreSQL nor MySQL is configured.
+if not os.environ.get('DATABASE_URL') and not os.environ.get('DB_NAME'):
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',

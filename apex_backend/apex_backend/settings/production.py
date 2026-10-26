@@ -1,9 +1,66 @@
 from .base import *
 import os
+from urllib.parse import urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 
 DEBUG = False
 
-CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',')
+
+def required_setting(name):
+    value = os.environ.get(name, '').strip()
+    if not value:
+        raise ImproperlyConfigured(f'{name} must be configured in production.')
+    return value
+
+
+def required_origins(name):
+    origins = [
+        origin.strip()
+        for origin in required_setting(name).split(',')
+        if origin.strip()
+    ]
+    parsed_origins = [urlparse(origin) for origin in origins]
+    if not origins or any(
+        parsed.scheme != 'https'
+        or not parsed.netloc
+        or parsed.path not in ('', '/')
+        or parsed.query
+        or parsed.fragment
+        or '*' in origin
+        for origin, parsed in zip(origins, parsed_origins)
+    ):
+        raise ImproperlyConfigured(f'{name} must contain HTTPS origins only.')
+    return origins
+
+
+required_setting('DATABASE_URL')
+if DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql':
+    raise ImproperlyConfigured('Production requires DATABASE_URL configured for PostgreSQL.')
+
+SECRET_KEY = required_setting('DJANGO_SECRET_KEY')
+if SECRET_KEY == 'dev-insecure-fallback-key-do-not-use-in-production':
+    raise ImproperlyConfigured('DJANGO_SECRET_KEY must not use the development fallback.')
+
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in required_setting('ALLOWED_HOSTS').split(',')
+    if host.strip()
+]
+if not ALLOWED_HOSTS or any('*' in host or '://' in host or '/' in host for host in ALLOWED_HOSTS):
+    raise ImproperlyConfigured('ALLOWED_HOSTS must contain explicit production hostnames.')
+
+CORS_ALLOWED_ORIGINS = required_origins('CORS_ALLOWED_ORIGINS')
+CSRF_TRUSTED_ORIGINS = required_origins('CSRF_TRUSTED_ORIGINS')
+
+EMAIL_HOST = required_setting('EMAIL_HOST')
+EMAIL_HOST_USER = required_setting('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = required_setting('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = required_setting('DEFAULT_FROM_EMAIL')
+
+FRONTEND_URL = required_setting('FRONTEND_URL')
+if urlparse(FRONTEND_URL).scheme != 'https' or not urlparse(FRONTEND_URL).netloc:
+    raise ImproperlyConfigured('FRONTEND_URL must be an HTTPS URL in production.')
 
 SECURE_SSL_REDIRECT = True
 SECURE_HSTS_SECONDS = 31536000

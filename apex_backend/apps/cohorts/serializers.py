@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db import models
 from django.utils import timezone
 from .models import (
     Cohort, Assessment, Question, AssessmentAttempt, CohortEnrollment,
@@ -27,6 +28,7 @@ class TutorialSerializer(serializers.ModelSerializer):
     progress = serializers.SerializerMethodField()
     can_start = serializers.SerializerMethodField()
     current_attempt = serializers.SerializerMethodField()
+    sponsorships = serializers.SerializerMethodField()
 
     class Meta:
         model = Tutorial
@@ -38,7 +40,7 @@ class TutorialSerializer(serializers.ModelSerializer):
             'decisions_and_tradeoffs', 'related_concepts',
             'difficulty', 'duration_minutes',
             'related_assessment_ids', 'scheduled_for', 'questions', 'progress',
-            'can_start', 'current_attempt',
+            'can_start', 'current_attempt', 'sponsorships',
         )
         read_only_fields = fields
 
@@ -66,6 +68,32 @@ class TutorialSerializer(serializers.ModelSerializer):
     def get_can_start(self, obj):
         from .weekly_schedule import activity_window
         return activity_window('tutorials') is not None
+
+    def get_sponsorships(self, obj):
+        from apps.vendor.models import SponsorshipCampaign
+
+        today = timezone.localdate()
+        campaigns = SponsorshipCampaign.objects.filter(
+            status='active',
+            start_date__lte=today,
+            end_date__gte=today,
+            vendor__status='approved',
+        ).filter(
+            models.Q(study_area=obj.field)
+            | models.Q(campaign_type__in=('tutorial', 'learning_initiative'))
+        ).select_related('vendor')
+        sponsorships = []
+        for campaign in campaigns:
+            targets = campaign.target_content_ids
+            if targets and str(obj.id) not in targets:
+                if campaign.study_area != obj.field:
+                    continue
+            sponsorships.append({
+                'campaign_id': str(campaign.id),
+                'sponsor_name': campaign.vendor.business_name,
+                'disclosure': campaign.sponsor_disclosure,
+            })
+        return sponsorships
 
     def get_current_attempt(self, obj):
         if self.context.get('include_attempt') is False:

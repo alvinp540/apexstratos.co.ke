@@ -35,8 +35,8 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ('id', 'email', 'username', 'role', 'is_email_verified',
-                  'phone_number', 'created_at', 'is_admin')
-        read_only_fields = ('id', 'is_email_verified', 'created_at')
+                  'phone_number', 'created_at', 'is_admin', 'is_active', 'is_superuser')
+        read_only_fields = ('id', 'is_email_verified', 'created_at', 'is_active', 'is_superuser')
 
     def get_is_admin(self, user):
         return user.is_admin

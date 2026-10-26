@@ -40,8 +40,11 @@ from .sponsored_views import (
     StartSponsoredViewAttemptView,
     SubmitSponsoredViewAttemptView,
 )
+from .review_views import AdminAssessmentReviewActionView, AdminAssessmentReviewListView
 
 urlpatterns = [
+    path('admin/content/', AdminAssessmentReviewListView.as_view(), name='admin-assessment-review-list'),
+    path('admin/content/<str:library>/<uuid:content_id>/', AdminAssessmentReviewActionView.as_view(), name='admin-assessment-review-action'),
     path('sponsored-view/assessments/', SponsoredViewAssessmentListView.as_view(), name='sponsored-view-assessment-list'),
     path('sponsored-view/assessments/<uuid:assessment_id>/payments/', SponsoredViewPaymentCreateView.as_view(), name='sponsored-view-payment-create'),
     path('sponsored-view/payments/', SponsoredViewPaymentListView.as_view(), name='sponsored-view-payment-list'),

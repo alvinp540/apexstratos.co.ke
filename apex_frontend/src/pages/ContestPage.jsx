@@ -18,6 +18,7 @@ import {
   submitMainContestPayment,
 } from '../api/cohortAPI'
 import { getErrorMessage, unwrapList } from '../api/client'
+import './VendorManagementPage.css'
 
 function formatDate(value) {
   if (!value) return 'Not provided'
@@ -364,6 +365,7 @@ export default function ContestPage() {
           <div className="tutorial-card-top"><span className="tag">{assessment.field}</span><span className="tag">Week {assessment.week}</span></div>
           <div className={`assessment-preview${locked ? ' assessment-preview-locked' : ''}`} aria-hidden={locked || undefined}>
             <h3>{assessment.title}</h3><p>{assessment.description}</p>
+            <ContestSponsorships sponsorships={assessment.sponsorships} />
           </div>
           {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 100 payment is verified for this study area. <a href="#contest-payment-form">Go to payment form.</a></p>}
           <div className="tutorial-meta"><span>10 questions · 20 minutes · KSh {assessment.access_price_kes}</span><span>{assessment.attempt?.status === 'graded' ? `Completed · ${assessment.attempt.score}%` : assessment.attempt?.status === 'timed_out' ? 'Attempt expired' : assessment.can_start ? 'Available now · EAT' : `Next opening: ${formatDate(assessment.next_opening_at)}`}</span></div>
@@ -420,7 +422,7 @@ function ContestCard({ assessment, onStart, onResume }) {
   const inProgress = attempt?.status === 'in_progress'
   return <article className="contest-card">
     <div className="contest-card-top"><span className="tag">{assessment.field}</span><span className="contest-slot">{contestDay(assessment.day)} · SLOT {assessment.assessment_slot}</span></div>
-    <h3>{assessment.title}</h3><p>{assessment.description}</p>
+    <h3>{assessment.title}</h3><p>{assessment.description}</p><ContestSponsorships sponsorships={assessment.sponsorships} />
     <div className="contest-facts"><span>{assessment.duration_minutes} minutes</span><span>{assessment.can_start ? `Window closes ${formatDate(assessment.window_closes_at)}` : `Next opening ${formatDate(assessment.next_opening_at)}`}</span></div>
     {submitted && <div className="contest-result"><span>Server result</span><strong>{attempt.score ?? '—'}%</strong><small>{attempt.is_flagged ? 'Flagged for review' : 'Submitted'} · {formatDate(attempt.submitted_at)}</small></div>}
     {attempt && !inProgress && !submitted && <div className="contest-expired">Attempt status: {attempt.status?.replaceAll('_', ' ') || 'unavailable'}. This attempt cannot be restarted.</div>}
@@ -428,12 +430,20 @@ function ContestCard({ assessment, onStart, onResume }) {
   </article>
 }
 
+function ContestSponsorships({ sponsorships = [] }) {
+  if (!sponsorships.length) return null
+  return <div className="vendor-campaign-disclosure" aria-label="Contest sponsorship disclosure">
+    {sponsorships.map((sponsorship) => <div key={`${sponsorship.sponsor_name}:${sponsorship.sponsor_disclosure}`}><p><strong>{sponsorship.sponsor_name} sponsorship:</strong> {sponsorship.sponsor_disclosure}</p>{Object.keys(sponsorship.eligibility_rules || {}).length > 0 && <p><strong>Sponsor-proposed participation information:</strong> {JSON.stringify(sponsorship.eligibility_rules)}</p>}</div>)}
+    <small>Sponsorship does not affect assessment questions, scoring, results, eligibility or awards.</small>
+  </div>
+}
+
 function ContestAttempt({ assessment, attempt, answers, reasoning, onAnswer, onReasoning, onSubmit, onExit, onExpireRetry, timer, submitting, error }) {
   const deadlineUnavailable = timer === '—'
   const expired = timer === '00:00'
   const missingReasoning = attempt.questions?.some((question) => question.requires_reasoning && !reasoning[question.id]?.trim())
   return <section className="panel contest-attempt">
-    <div className="contest-attempt-heading"><div><div className="eyebrow">{assessment.field} · LIVE ATTEMPT</div><h2>{attempt.title || assessment.title}</h2><p>{attempt.description || assessment.description}</p></div><div className={`contest-timer${expired ? ' timer-expired' : ''}`}><small>SERVER DEADLINE</small><strong>{timer}</strong><span>{formatDate(attempt.deadline_at)}</span></div></div>
+    <div className="contest-attempt-heading"><div><div className="eyebrow">{assessment.field} · LIVE ATTEMPT</div><h2>{attempt.title || assessment.title}</h2><p>{attempt.description || assessment.description}</p><ContestSponsorships sponsorships={assessment.sponsorships} /></div><div className={`contest-timer${expired ? ' timer-expired' : ''}`}><small>SERVER DEADLINE</small><strong>{timer}</strong><span>{formatDate(attempt.deadline_at)}</span></div></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {deadlineUnavailable && <div className="alert alert-error" role="alert">A server deadline was not provided, so this attempt cannot be answered safely. Reload the contest list or contact support.</div>}
     {attempt.questions?.length ? <div className="contest-question-list">{attempt.questions.map((question, index) => <fieldset key={question.id} className="contest-question" disabled={expired || deadlineUnavailable || submitting}><legend><span>QUESTION {index + 1} OF {attempt.questions.length}</span>{question.prompt}</legend><div className="contest-options">{(question.options || []).map((option, optionIndex) => {

@@ -6,6 +6,8 @@ import { Admin, Merit, Notifications, Profile } from './pages/AccountPages'
 import ContestPage from './pages/ContestPage'
 import { AreaTutorials, Mentorship, Opportunities, SponsoredView, StudyAreas, TutorialDetail, Tutorials } from './pages/LearningPages'
 import { AuthPage, Dashboard, Landing } from './pages/PublicPages'
+import VendorManagementPage from './pages/VendorManagementPage'
+import CampaignCataloguePage from './pages/CampaignCataloguePage'
 
 function Protected() {
   const { user, loading } = useAuth()
@@ -19,6 +21,7 @@ export default function App() {
     <Route path="/" element={<Landing />} />
     <Route path="/login" element={<AuthPage mode="login" />} />
     <Route path="/register" element={<AuthPage mode="register" />} />
+    <Route path="/campaigns" element={<CampaignCataloguePage />} />
     <Route element={<Protected />}>
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/study" element={<StudyAreas />} />
@@ -33,6 +36,7 @@ export default function App() {
       <Route path="/profile" element={<Profile />} />
       <Route path="/notifications" element={<Notifications />} />
       <Route path="/admin" element={<Admin />} />
+      <Route path="/vendor" element={<VendorManagementPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>

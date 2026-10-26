@@ -17,6 +17,7 @@ export default function Shell() {
         <div className="side-bottom">
           <NavLink to="/notifications" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}><span className="nav-icon">◉</span>Notifications</NavLink>
           {user?.is_admin && <NavLink to="/admin" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}><span className="nav-icon">⌘</span>Admin tools</NavLink>}
+          {user?.role === 'vendor' && <NavLink to="/vendor" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}><span className="nav-icon">◈</span>Vendor workspace</NavLink>}
           <div className="user-mini"><div className="avatar">{(user?.username || user?.email || 'A')[0].toUpperCase()}</div><div className="user-meta"><strong>{user?.username || 'Apex learner'}</strong><span>{user?.role || 'student'}</span></div><button className="icon-button" title="Sign out" onClick={logout}>↗</button></div>
         </div>
       </aside>

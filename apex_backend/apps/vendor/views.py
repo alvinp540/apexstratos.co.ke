@@ -7,10 +7,12 @@ from django.db.models import Count, Avg, Q
 
 from .models import VendorJob, VendorRating
 from .serializers import VendorJobSerializer, VendorRatingSerializer
-from apps.accounts.permissions import IsVendor
+from apps.accounts.permissions import IsApprovedVendor, IsProfessional
 
 
 class VendorJobListCreateView(APIView):
+    permission_classes = (IsApprovedVendor,)
+
     def get(self, request):
         jobs = VendorJob.objects.filter(vendor=request.user).order_by('-created_at')
         return Response(VendorJobSerializer(jobs, many=True).data)
@@ -23,6 +25,8 @@ class VendorJobListCreateView(APIView):
 
 
 class VendorJobDetailView(APIView):
+    permission_classes = (IsApprovedVendor,)
+
     def get(self, request, job_id):
         job = get_object_or_404(VendorJob, id=job_id, vendor=request.user)
         return Response(VendorJobSerializer(job).data)
@@ -48,6 +52,8 @@ class VendorJobDetailView(APIView):
 
 
 class PublishJobView(APIView):
+    permission_classes = (IsApprovedVendor,)
+
     def post(self, request, job_id):
         job = get_object_or_404(VendorJob, id=job_id, vendor=request.user, status='draft')
         job.status = 'open'
@@ -58,6 +64,8 @@ class PublishJobView(APIView):
 
 
 class RateProfessionalView(APIView):
+    permission_classes = (IsApprovedVendor,)
+
     def post(self, request, job_id):
         job = get_object_or_404(
             VendorJob, id=job_id, vendor=request.user, status='completed'
@@ -77,6 +85,8 @@ class RateProfessionalView(APIView):
 
 
 class JobMatchesView(APIView):
+    permission_classes = (IsApprovedVendor,)
+
     def get(self, request, job_id):
         from apps.fraud.models import Opportunity
         job = get_object_or_404(VendorJob, id=job_id, vendor=request.user)
@@ -88,9 +98,6 @@ class JobMatchesView(APIView):
                 'professional_id': str(o.professional_id),
                 'full_name': getattr(getattr(o.professional, 'profile', None), 'full_name', ''),
                 'profession': getattr(getattr(o.professional, 'profile', None), 'profession', ''),
-                'router_score': o.router_score,
-                'merit_score': getattr(getattr(o.professional, 'trust_score', None), 'overall_merit_score', 0),
-                'tier': getattr(getattr(o.professional, 'trust_score', None), 'tier', ''),
                 'status': o.status,
             }
             for o in opps
@@ -99,7 +106,9 @@ class JobMatchesView(APIView):
 
 
 class VendorDashboardView(APIView):
-    def post(self, request):
+    permission_classes = (IsApprovedVendor,)
+
+    def get(self, request):
         jobs = VendorJob.objects.filter(vendor=request.user)
         return Response({
             'total_jobs': jobs.count(),
@@ -112,6 +121,8 @@ class VendorDashboardView(APIView):
 
 
 class ProfessionalOpportunityView(APIView):
+    permission_classes = (IsProfessional,)
+
     def get(self, request):
         jobs = VendorJob.objects.filter(status='open').order_by('-priority', '-created_at')
         profession = request.query_params.get('profession')

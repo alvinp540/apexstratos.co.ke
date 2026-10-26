@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { getJobMatches } from '../../api/vendorAPI'
-import MeritBadge from '../common/MeritBadge'
 import LoadingSpinner from '../common/LoadingSpinner'
 
 export default function MatchedProfessionals({ jobId }) {
@@ -23,11 +22,7 @@ export default function MatchedProfessionals({ jobId }) {
             {m.full_name}
             <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginLeft: '0.5rem' }}>{m.profession}</span>
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Score: {m.router_score}</span>
-            <span style={{ fontSize: '0.85rem' }}>Merit: {m.merit_score?.toFixed(1)}</span>
-            <MeritBadge tier={m.tier} size="sm" />
-          </div>
+          <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'capitalize' }}>{m.status?.replaceAll('_', ' ')}</span>
         </div>
       ))}
     </div>

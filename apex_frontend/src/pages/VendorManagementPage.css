@@ -1,0 +1,48 @@
+.vendor-tabs, .vendor-campaign-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-bottom: 1rem; }
+.vendor-overview, .vendor-management { display: grid; gap: 1rem; }
+.vendor-overview > .panel, .vendor-management > .panel { padding: 1rem; }
+.vendor-profile-status { align-items: start; display: flex; flex-wrap: wrap; gap: 2rem; justify-content: space-between; }
+.vendor-profile-status > div { display: grid; gap: .55rem; }
+.vendor-profile-logo { border-radius: 8px; height: 72px; object-fit: contain; width: 72px; }
+.vendor-stat-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.vendor-stat { display: grid; gap: .4rem; padding: 1rem; text-transform: capitalize; }
+.vendor-stat strong { font-size: 1.6rem; }
+.vendor-billing-note { display: grid; gap: .3rem; }
+.vendor-form { display: grid; gap: .9rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 1rem; }
+.vendor-form label, .vendor-document-form label { display: grid; gap: .4rem; }
+.vendor-form input, .vendor-form select, .vendor-form textarea, .vendor-document-form input { max-width: 100%; min-width: 0; width: 100%; }
+.vendor-form-wide { grid-column: 1 / -1; }
+.vendor-form > button { justify-self: start; }
+.vendor-document-form { align-items: end; display: flex; flex-wrap: wrap; gap: .8rem; margin: 1rem 0; }
+.vendor-document-form label { flex: 1 1 230px; }
+.vendor-verification-list { display: grid; gap: .5rem; list-style: none; padding: 0; }
+.vendor-verification-list li { align-items: center; display: flex; flex-wrap: wrap; gap: .6rem; }
+.vendor-campaign-layout { align-items: start; display: grid; gap: 1rem; grid-template-columns: minmax(230px, .75fr) minmax(0, 1.5fr); }
+.vendor-campaign-list, .vendor-campaign-detail { min-width: 0; padding: 1rem; }
+.vendor-campaign-row { background: transparent; border: 1px solid var(--line, #34432e); border-radius: 7px; color: inherit; cursor: pointer; display: grid; gap: .4rem; margin-top: .55rem; padding: .8rem; text-align: left; width: 100%; }
+.vendor-campaign-row.selected { border-color: var(--accent, #9cbf67); }
+.vendor-campaign-row > span:nth-child(2) { opacity: .75; }
+.vendor-campaign-detail { overflow-wrap: anywhere; }
+.vendor-report { border-top: 1px solid var(--line, #34432e); margin-top: 1.3rem; padding-top: 1rem; }
+.vendor-report-grid { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
+.vendor-report-grid > div { border: 1px solid var(--line, #34432e); border-radius: 7px; display: grid; gap: .4rem; padding: .75rem; text-transform: capitalize; }
+.vendor-report-grid strong { font-size: 1.2rem; }
+.status-pending, .status-pending_approval, .status-changes_requested, .status-cancellation_requested { color: #d2a649; }
+.status-approved, .status-active, .status-succeeded { color: #80bd82; }
+.status-rejected, .status-suspended, .status-failed { color: #da7777; }
+.vendor-campaign-disclosure { border-left: 3px solid var(--accent, #9cbf67); display: grid; gap: .4rem; padding: 1rem; }
+.vendor-public-campaign { display: grid; gap: .6rem; padding: 1rem; }
+.admin-vendor-panel, .admin-vendor-list { display: grid; gap: 1rem; }
+.admin-vendor-controls { align-items: end; display: flex; flex-wrap: wrap; gap: .75rem; justify-content: space-between; padding: 1rem; }
+.admin-vendor-controls label, .admin-vendor-card > label { display: grid; gap: .4rem; }
+.admin-vendor-controls select, .admin-vendor-card textarea { max-width: 100%; min-width: 0; }
+.admin-vendor-card { display: grid; gap: .75rem; overflow-wrap: anywhere; padding: 1rem; }
+.admin-vendor-card h2, .admin-vendor-card h3, .admin-vendor-card p { margin: 0; }
+.admin-vendor-verification { align-items: center; border-top: 1px solid var(--line, #34432e); display: flex; flex-wrap: wrap; gap: .65rem; padding-top: .75rem; }
+.admin-vendor-verification label { display: grid; flex: 1 1 100%; gap: .35rem; }
+.admin-vendor-assets { display: flex; flex-wrap: wrap; gap: .7rem; }
+.admin-vendor-card details { border-top: 1px solid var(--line, #34432e); padding-top: .75rem; }
+.vendor-report-trends { display: grid; gap: .75rem; margin-top: 1rem; }
+.vendor-report-trends h4 { margin: 0; }
+@media (max-width: 720px) { .vendor-campaign-layout { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .vendor-form { grid-template-columns: 1fr; } .vendor-form-wide { grid-column: auto; } }

@@ -1,0 +1,29 @@
+.admin-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.assessment-review { display: grid; gap: 1rem; }
+.assessment-review-filters { align-items: end; display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem; }
+.assessment-review-filters label { display: grid; flex: 1 1 180px; gap: .4rem; }
+.assessment-review-filters input, .assessment-review-filters select { min-width: 0; width: 100%; }
+.assessment-review-layout { align-items: start; display: grid; gap: 1rem; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.8fr); }
+.assessment-review-queue, .assessment-review-detail { min-width: 0; padding: 1rem; }
+.assessment-review-items { display: grid; gap: .5rem; margin: 1rem 0; }
+.assessment-review-item { background: transparent; border: 1px solid var(--border, #34432e); border-radius: 8px; color: inherit; cursor: pointer; display: grid; gap: .35rem; padding: .8rem; text-align: left; }
+.assessment-review-item.selected { border-color: var(--accent, #9cbf67); }
+.assessment-review-item span:not(.tag) { opacity: .75; }
+.assessment-review-detail { overflow-wrap: anywhere; }
+.assessment-review-detail h3 { margin: 1.2rem 0 .5rem; text-transform: capitalize; }
+.assessment-review-section, .assessment-review-question { border-top: 1px solid var(--border, #34432e); padding: .8rem 0; }
+.assessment-review-section p, .assessment-review-question p { white-space: pre-wrap; }
+.assessment-review-question li { margin: .3rem 0; }
+.assessment-review-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+.admin-account-management { display: grid; gap: 1rem; }
+.admin-account-management > .panel { padding: 1rem; }
+.admin-account-form { display: grid; gap: .8rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 1rem 0; }
+.admin-account-form label, .admin-role-control { display: grid; gap: .35rem; }
+.admin-account-form input, .admin-role-control select { max-width: 100%; min-width: 0; }
+.admin-account-form > .soft-label, .admin-account-form > button { align-self: end; }
+.admin-role-control { min-width: 145px; }
+.admin-account-search { align-items: end; display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; }
+.admin-account-search label { display: grid; flex: 1 1 220px; gap: .35rem; }
+.admin-account-search input { min-width: 0; width: 100%; }
+@media (max-width: 760px) { .assessment-review-layout { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .admin-account-form { grid-template-columns: 1fr; } }

@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api, { getErrorMessage, unwrapList } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import Page from '../components/Page'
-import { Empty, ErrorState, Loading, Unavailable } from '../components/States'
+import { Empty, ErrorState, Loading, PaginationControls, Unavailable } from '../components/States'
+import AdminAssessmentReview from './AdminAssessmentReview'
+import AdminVendorManagement from './AdminVendorManagement'
 
 function safeActionUrl(value) {
   if (typeof value !== 'string') return null
@@ -136,20 +138,106 @@ export function Notifications() {
 export function Admin() {
   const { user } = useAuth()
   const [users, setUsers] = useState([])
+  const [usersTotal, setUsersTotal] = useState(0)
+  const [usersPage, setUsersPage] = useState(1)
+  const [userSearchInput, setUserSearchInput] = useState('')
+  const [userSearch, setUserSearch] = useState('')
   const [logs, setLogs] = useState([])
+  const [tab, setTab] = useState('assessments')
+  const [roleDrafts, setRoleDrafts] = useState({})
+  const [roleBusy, setRoleBusy] = useState('')
+  const [accountForm, setAccountForm] = useState({ email: '', username: '', password: '', password_confirm: '' })
+  const [accountBusy, setAccountBusy] = useState(false)
+  const [accountMessage, setAccountMessage] = useState({ error: '', success: '' })
   const [status, setStatus] = useState({ loading: true, error: '' })
-  const load = async () => {
+  const load = useCallback(async () => {
+    if (tab === 'vendors') return
     setStatus({ loading: true, error: '' })
     try {
-      const [userData, logData] = await Promise.all([api.get('/admin/users/'), api.get('/admin/fraud-logs/')])
+      const [userData, logData] = await Promise.all([
+        api.get('/admin/users/', { params: { page: usersPage, ...(userSearch ? { search: userSearch } : {}) } }),
+        api.get('/admin/fraud-logs/'),
+      ])
       setUsers(unwrapList(userData.data))
+      setUsersTotal(userData.data?.count ?? unwrapList(userData.data).length)
       setLogs(unwrapList(logData.data))
       setStatus({ loading: false, error: '' })
     } catch (error) { setStatus({ loading: false, error: getErrorMessage(error) }) }
+  }, [tab, userSearch, usersPage])
+  useEffect(() => { if (tab !== 'vendors') load() }, [load, tab])
+  const updateRole = async (entry) => {
+    const role = roleDrafts[entry.id] || entry.role
+    if (role === entry.role) return
+    if (role === 'admin' && !window.confirm(`Grant administrator access to ${entry.email}?`)) {
+      setRoleDrafts((current) => ({ ...current, [entry.id]: entry.role }))
+      return
+    }
+    if (entry.role === 'admin' && role !== 'admin' && !window.confirm(`Remove administrator access from ${entry.email}?`)) {
+      setRoleDrafts((current) => ({ ...current, [entry.id]: entry.role }))
+      return
+    }
+    setRoleBusy(entry.id)
+    setAccountMessage({ error: '', success: '' })
+    try {
+      const { data } = await api.patch(`/admin/users/${entry.id}/role/`, { role })
+      setUsers((current) => current.map((item) => item.id === entry.id ? data : item))
+      setRoleDrafts((current) => ({ ...current, [entry.id]: data.role }))
+      setAccountMessage({ error: '', success: `Updated ${entry.email} to ${data.role}.` })
+    } catch (error) {
+      setRoleDrafts((current) => ({ ...current, [entry.id]: entry.role }))
+      setAccountMessage({ error: getErrorMessage(error), success: '' })
+    } finally {
+      setRoleBusy('')
+    }
   }
-  useEffect(() => { load() }, [])
+  const createAdminAccount = async (event) => {
+    event.preventDefault()
+    setAccountBusy(true)
+    setAccountMessage({ error: '', success: '' })
+    try {
+      const { data } = await api.post('/admin/users/admin-accounts/', accountForm)
+      setAccountForm({ email: '', username: '', password: '', password_confirm: '' })
+      setAccountMessage({ error: '', success: `Admin account created for ${data.email}. Share the initial password through a secure channel.` })
+      setUsersPage(1)
+    } catch (error) {
+      setAccountMessage({ error: getErrorMessage(error), success: '' })
+    } finally {
+      setAccountBusy(false)
+    }
+  }
   if (!user?.is_admin) return <Page eyebrow="RESTRICTED AREA" title="Admin tools"><Unavailable title="Admin access required">These tools are restricted by the backend. Sign in with an authorized admin account to continue.</Unavailable></Page>
   return <Page eyebrow="PLATFORM OPERATIONS" title="Admin tools" description="Administrative information is fetched from permission-protected Apex endpoints." action={<Link className="button button-quiet" to="/contests#main-contest-payments">Review contest payments <span>↗</span></Link>}>
-    {status.loading ? <Loading label="Loading admin records…" /> : status.error ? <ErrorState message={status.error} retry={load} /> :     <div className="dashboard-bottom"><section className="panel"><div className="panel-heading"><h2>Users</h2><span className="soft-label">{users.length} on this page</span></div>{users.length ? <div className="admin-list">{users.map((entry) => <div key={entry.id} className="admin-row"><div><strong>{entry.username}</strong><small>{entry.email}</small></div><span className="tag">{entry.role}</span><span className={entry.is_email_verified ? 'status-ok' : 'status-warn'}>{entry.is_email_verified ? 'Verified' : 'Unverified'}</span></div>)}</div> : <Empty title="No users returned" />}</section><section className="panel"><div className="panel-heading"><h2>Fraud review</h2><span className="soft-label">{logs.length} on this page</span></div>{logs.length ? <div className="admin-list">{logs.map((entry) => <article key={entry.id} className="admin-log"><strong>{entry.event_type || 'Review record'}{entry.severity ? ` · ${entry.severity}` : ''}</strong><p>{entry.description || 'No further detail provided.'}</p><span>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''}</span><span className={entry.is_resolved ? 'status-ok' : 'status-warn'}>{entry.is_resolved ? 'Resolved' : 'Open'}</span></article>)}</div> : <Empty title="No fraud logs returned">There are no records to show on this page.</Empty>}</section></div>}
+    <div className="admin-tabs" role="tablist" aria-label="Admin sections">
+      {['assessments', 'vendors', 'users', 'fraud'].map((section) => <button className={`button ${tab === section ? 'button-primary' : 'button-quiet'}`} key={section} type="button" role="tab" aria-selected={tab === section} onClick={() => setTab(section)}>{section === 'fraud' ? 'Fraud review' : section === 'users' ? 'Users' : section === 'vendors' ? 'Vendors & campaigns' : 'Assessment review'}</button>)}
+    </div>
+    {tab === 'vendors' ? <AdminVendorManagement /> : tab === 'assessments' ? <AdminAssessmentReview /> : status.loading ? <Loading label="Loading admin records…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : tab === 'users' ?
+      <div className="admin-account-management">
+        <section className="panel">
+          <div className="panel-heading"><h2>Create admin account</h2></div>
+          <p>Create an administrator account from this protected page. This account is marked verified and receives staff access.</p>
+          <form className="admin-account-form" onSubmit={createAdminAccount}>
+            <label>Username<input required maxLength={150} autoComplete="username" value={accountForm.username} onChange={(event) => setAccountForm((current) => ({ ...current, username: event.target.value }))} /></label>
+            <label>Email<input required type="email" autoComplete="email" value={accountForm.email} onChange={(event) => setAccountForm((current) => ({ ...current, email: event.target.value }))} /></label>
+            <label>Initial password<input required type="password" autoComplete="new-password" value={accountForm.password} onChange={(event) => setAccountForm((current) => ({ ...current, password: event.target.value }))} /></label>
+            <label>Confirm password<input required type="password" autoComplete="new-password" value={accountForm.password_confirm} onChange={(event) => setAccountForm((current) => ({ ...current, password_confirm: event.target.value }))} /></label>
+            <p className="soft-label">Use a unique password and share it only through a secure channel. Django’s configured password validators apply.</p>
+            <button className="button button-primary" type="submit" disabled={accountBusy}>{accountBusy ? 'Creating…' : 'Create admin account'}</button>
+          </form>
+          {accountMessage.error && <div className="alert alert-error" role="alert">{accountMessage.error}</div>}
+          {accountMessage.success && <div className="alert alert-success" role="status">{accountMessage.success}</div>}
+        </section>
+        <section className="panel">
+          <div className="panel-heading"><h2>Account types</h2><span className="soft-label">{users.length} on this page</span></div>
+          <p>Admin access is granted only here by an existing administrator. Public registration cannot create admin accounts. Promote another active admin before removing the last admin role.</p>
+          <form className="admin-account-search" onSubmit={(event) => { event.preventDefault(); setUserSearch(userSearchInput.trim()); setUsersPage(1) }}>
+            <label>Find an account<input value={userSearchInput} maxLength={120} placeholder="Email or username" onChange={(event) => setUserSearchInput(event.target.value)} /></label>
+            <button className="button button-quiet" type="submit">Search</button>
+            {userSearch && <button className="button button-quiet" type="button" onClick={() => { setUserSearchInput(''); setUserSearch(''); setUsersPage(1) }}>Clear</button>}
+          </form>
+          {users.length ? <div className="admin-list">{users.map((entry) => <div key={entry.id} className="admin-row"><div><strong>{entry.username}</strong><small>{entry.email}</small></div><span className={entry.is_email_verified ? 'status-ok' : 'status-warn'}>{entry.is_email_verified ? 'Verified' : 'Unverified'}</span><label className="admin-role-control"><span className="soft-label">Account type</span><select aria-label={`Account type for ${entry.email}`} disabled={roleBusy === entry.id || entry.id === user?.id || entry.is_superuser} value={roleDrafts[entry.id] || entry.role} onChange={(event) => setRoleDrafts((current) => ({ ...current, [entry.id]: event.target.value }))}><option value="professional">Student</option><option value="vendor">Organization / vendor</option><option value="admin">Admin</option></select></label><button className="button button-quiet" type="button" disabled={roleBusy === entry.id || entry.id === user?.id || entry.is_superuser || (roleDrafts[entry.id] || entry.role) === entry.role} onClick={() => updateRole(entry)}>{roleBusy === entry.id ? 'Saving…' : 'Save type'}</button></div>)}</div> : <Empty title="No users returned" />}
+          <PaginationControls page={usersPage} total={usersTotal} onPageChange={setUsersPage} />
+        </section>
+      </div> :
+      <section className="panel"><div className="panel-heading"><h2>Fraud review</h2><span className="soft-label">{logs.length} on this page</span></div>{logs.length ? <div className="admin-list">{logs.map((entry) => <article key={entry.id} className="admin-log"><strong>{entry.event_type || 'Review record'}{entry.severity ? ` · ${entry.severity}` : ''}</strong><p>{entry.description || 'No further detail provided.'}</p><span>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''}</span><span className={entry.is_resolved ? 'status-ok' : 'status-warn'}>{entry.is_resolved ? 'Resolved' : 'Open'}</span></article>)}</div> : <Empty title="No fraud logs returned">There are no records to show on this page.</Empty>}</section>}
   </Page>
 }
