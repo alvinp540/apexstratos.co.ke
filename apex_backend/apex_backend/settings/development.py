@@ -1,5 +1,4 @@
 from .base import *
-import os
 
 DEBUG = True
 ALLOWED_HOSTS = ['*']
@@ -13,12 +12,3 @@ CHANNEL_LAYERS = {
         'BACKEND': 'channels.layers.InMemoryChannelLayer',
     }
 }
-
-# Use SQLite only when neither PostgreSQL nor MySQL is configured.
-if not os.environ.get('DATABASE_URL') and not os.environ.get('DB_NAME'):
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
