@@ -4,7 +4,7 @@
 
 - Frontend: React 18 and Vite 5; install with npm and build with `npm run build` from `apex_frontend`.
 - Backend: Django 5.2, Django REST Framework, Channels and Daphne; dependencies are listed in `apex_backend/requirements.txt`.
-- Database: PostgreSQL is configured with `DATABASE_URL` and is required by the current Django settings. PostgreSQL uses Django `JSONField` as native `jsonb`, and imported content packs are stored in the existing assessment, tutorial, and question models.
+- Database: PostgreSQL is selected with `DATABASE_URL` and is required in production. Development may use the existing SQLite database; legacy MySQL settings remain available for development only. PostgreSQL uses Django `JSONField` as native `jsonb`, and imported content packs are stored in the existing assessment, tutorial, and question models.
 - Migrations: Django migrations, applied with `python manage.py migrate` only after a production backup and migration review.
 - Existing process declaration: `apex_backend/Procfile` defines Daphne and a Celery worker. It does not establish that Pinnacle/cPanel supports Procfiles, Daphne, Redis or persistent workers.
 - Frontend API: `/api/v1` by default. WebSockets use same-origin `ws:`/`wss:` unless `VITE_WS_BASE_URL` is set.
@@ -26,7 +26,7 @@ python manage.py test apps.cohorts.tests.test_allocation --settings=apex_backend
 python manage.py test apps.cohorts.tests.test_content_import --settings=apex_backend.settings.development
 ```
 
-To use PostgreSQL locally, create a database and set `DATABASE_URL` in `apex_backend/.env` (for example, `postgresql://apex_user:your-password@127.0.0.1:5432/apex_db`). Then run `python manage.py migrate --settings=apex_backend.settings.development`. The current Django settings accept PostgreSQL through DATABASE_URL only; they do not enable MySQL or SQLite as runtime database backends.
+To use PostgreSQL locally, create a database and set `DATABASE_URL` in `apex_backend/.env` (for example, `postgresql://apex_user:your-password@127.0.0.1:5432/apex_db`). Then run `python manage.py migrate --settings=apex_backend.settings.development`. PostgreSQL takes precedence over the legacy MySQL `DB_NAME` setting; SQLite remains the fallback when neither is configured. Switching from SQLite does not copy existing rows: back up and migrate data separately if it must be retained.
 
 Content-pack JSON files are imported through the existing validated management commands, not loaded automatically at startup. Run a dry-run/preflight first; only apply validated packs after review. Existing model `JSONField` values, including learning objectives, options, and related IDs, use PostgreSQL `jsonb`.
 
@@ -69,6 +69,7 @@ Set these in the hosting platform's protected environment-variable UI, not in Gi
 - `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`: comma-separated HTTPS origins.
 - `DATABASE_URL`: required PostgreSQL connection URL. Production startup rejects SQLite and MySQL; keep credentials in the protected environment configuration.
 - `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`: required production SMTP configuration.
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`: legacy MySQL connection settings.
 - `REDIS_URL`: production Redis URL if the deployed Channels/Celery features require Redis.
 - `FRONTEND_URL`: production frontend base URL.
 - `APEX_VERSION`, `GIT_COMMIT`: release label and exact deployed commit.
