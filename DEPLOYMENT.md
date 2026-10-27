@@ -67,7 +67,7 @@ Set these in the hosting platform's protected environment-variable UI, not in Gi
 - `DJANGO_SECRET_KEY`: newly generated production-only secret.
 - `RENDER_EXTERNAL_HOSTNAME`: Render supplies the service hostname automatically and production settings add it to Django's allowed hosts.
 - `ALLOWED_HOSTS`: optional comma-separated explicit hostnames, such as a custom backend domain; required when not running on Render. Wildcards are rejected.
-- `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`: comma-separated HTTPS origins.
+- `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`: comma-separated HTTPS origins. The production settings also allow the first-party sites `https://apexstratos.courses` and `https://www.apexstratos.courses`; add other deployment origins here as needed.
 - `DATABASE_URL`: required PostgreSQL connection URL. Production startup rejects SQLite and MySQL; keep credentials in the protected environment configuration.
 - `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`: required production SMTP configuration.
 - `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`: legacy MySQL connection settings.

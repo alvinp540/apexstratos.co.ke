@@ -6,6 +6,11 @@ from django.core.exceptions import ImproperlyConfigured
 
 DEBUG = False
 
+FIRST_PARTY_FRONTEND_ORIGINS = (
+    'https://apexstratos.courses',
+    'https://www.apexstratos.courses',
+)
+
 
 def required_setting(name):
     value = os.environ.get(name, '').strip()
@@ -15,11 +20,14 @@ def required_setting(name):
 
 
 def required_origins(name):
-    origins = [
+    configured_origins = [
         origin.strip()
         for origin in required_setting(name).split(',')
         if origin.strip()
     ]
+    origins = list(dict.fromkeys(
+        (*FIRST_PARTY_FRONTEND_ORIGINS, *configured_origins)
+    ))
     parsed_origins = [urlparse(origin) for origin in origins]
     if not origins or any(
         parsed.scheme != 'https'
