@@ -1,0 +1,22 @@
+{
+  "services": {
+    "my_frontend": {
+      "root": "apex_frontend/",
+      "framework": "vite"
+    },
+    "my_backend": {
+      "root": "apex_backend/",
+      "entrypoint": "apex_backend.asgi:application"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": { "service": "my_backend" }
+    },
+    {
+      "source": "/(.*)",
+      "destination": { "service": "my_frontend" }
+    }
+  ]
+}   

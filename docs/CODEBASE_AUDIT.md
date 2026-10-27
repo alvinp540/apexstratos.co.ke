@@ -10,7 +10,7 @@ The project directory was untracked in Git when inspected. No branch or commit c
 
 - **Frontend:** React 18, Vite 5, React Router 6, JavaScript/JSX and a shared Axios client. There is no TypeScript or Tailwind dependency in the current package manifest.
 - **Backend:** Django 5.2, Django REST Framework, SimpleJWT, Channels, Celery and modular Django apps. The API is mounted under `/api/v1/`.
-- **Persistence:** Django ORM with versioned migrations. Development defaults to the existing SQLite database; settings also accept PostgreSQL `DATABASE_URL` and legacy MySQL variables.
+- **Persistence:** Django ORM with versioned migrations. The current settings require PostgreSQL via `DATABASE_URL`.
 - **Authentication:** Custom UUID user model using email as the login identifier; JWT access and refresh tokens are stored by the browser in `localStorage`.
 - **Domains present:** accounts/profiles, cohorts/tutorials/assessments, rankings/trust, vendor, escrow, notifications, analytics, fraud and social. Opportunity/support-programme code is partly in the cohorts domain rather than a standalone opportunities app.
 - **Deployment:** Existing deployment notes describe a cPanel target but explicitly state that Python application management, PostgreSQL, Redis, WebSockets, workers and static routing need provider confirmation.
