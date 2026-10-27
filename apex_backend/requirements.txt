@@ -23,3 +23,5 @@ Pillow==11.3.0
 gunicorn==22.0.0
 whitenoise==6.7.0
 django-extensions==3.2.3
+psycopg[binary]
+python-dotenv
