@@ -1,15 +1,20 @@
+import logging
+import smtplib
+import uuid
+from datetime import timedelta
+
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import status
+from rest_framework.exceptions import APIException
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import authenticate
 from django.utils.crypto import get_random_string
 from django.utils import timezone
-from datetime import timedelta
-import uuid
-from django.conf import settings
+from django.db import transaction
 
 from .serializers import (
     RegisterSerializer, LoginSerializer, UserSerializer,
@@ -17,30 +22,54 @@ from .serializers import (
 )
 from .models import User
 
+logger = logging.getLogger(__name__)
+
+
+class VerificationEmailUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = (
+        'Registration could not be completed because the verification '
+        'email could not be sent. Please try again later.'
+    )
+
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        user.email_verification_token = str(uuid.uuid4())
+        with transaction.atomic():
+            serializer = RegisterSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user = serializer.save()
 
-        if settings.EMAIL_HOST_USER:
-            user.save(update_fields=['email_verification_token'])
-            try:
+            if settings.REQUIRE_EMAIL_VERIFICATION:
+                user.email_verification_token = str(uuid.uuid4())
+                user.save(update_fields=['email_verification_token'])
                 from .tasks import send_verification_email
-                send_verification_email.delay(str(user.id))
-            except Exception:
-                pass
-        else:
-            user.is_email_verified = True
-            user.email_verification_token = None
-            user.save(update_fields=['is_email_verified', 'email_verification_token'])
+                try:
+                    send_verification_email.apply(
+                        args=(str(user.id),),
+                        throw=True,
+                    )
+                except (smtplib.SMTPException, OSError) as exc:
+                    logger.exception('Could not send registration verification email.')
+                    raise VerificationEmailUnavailable() from exc
+            else:
+                user.is_email_verified = True
+                user.email_verification_token = None
+                user.save(update_fields=[
+                    'is_email_verified',
+                    'email_verification_token',
+                ])
 
         return Response(
-            {'message': 'Registration successful. Check your email to verify your account.'},
+            {
+                'message': (
+                    'Registration successful. Check your email to verify your account.'
+                    if settings.REQUIRE_EMAIL_VERIFICATION
+                    else 'Registration successful. You can now sign in.'
+                )
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -57,7 +86,7 @@ class LoginView(APIView):
         )
         if not user:
             return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
-        if not user.is_email_verified and settings.EMAIL_HOST_USER:
+        if not user.is_email_verified and settings.REQUIRE_EMAIL_VERIFICATION:
             return Response({'error': 'Email not verified.'}, status=status.HTTP_403_FORBIDDEN)
         refresh = RefreshToken.for_user(user)
         return Response({

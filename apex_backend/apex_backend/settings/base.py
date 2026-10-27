@@ -397,6 +397,10 @@ DEFAULT_FROM_EMAIL = os.environ.get(
     "DEFAULT_FROM_EMAIL",
     "APEX Platform <noreply@apexstratos.courses>",
 )
+REQUIRE_EMAIL_VERIFICATION = env_bool(
+    "REQUIRE_EMAIL_VERIFICATION",
+    default=bool(EMAIL_HOST_USER),
+)
 
 
 # --------------------------------------------------

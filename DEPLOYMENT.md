@@ -70,6 +70,7 @@ Set these in the hosting platform's protected environment-variable UI, not in Gi
 - `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`: comma-separated HTTPS origins. The production settings also allow the first-party sites `https://apexstratos.courses` and `https://www.apexstratos.courses`; add other deployment origins here as needed.
 - `DATABASE_URL`: required PostgreSQL connection URL. Production startup rejects SQLite and MySQL; keep credentials in the protected environment configuration.
 - `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`: required production SMTP configuration.
+- `REQUIRE_EMAIL_VERIFICATION`: defaults to `True` in production. Set to `False` only for demos to immediately verify newly registered accounts without sending email; configure SMTP separately if password-reset email is needed.
 - `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`: legacy MySQL connection settings.
 - `REDIS_URL`: production Redis URL if the deployed Channels/Celery features require Redis.
 - `FRONTEND_URL`: production frontend base URL.
@@ -78,7 +79,7 @@ Set these in the hosting platform's protected environment-variable UI, not in Gi
 
 `apex_backend/.env.example` and `apex_frontend/.env.example` contain names only. Never upload local `.env` files or add secret values to GitHub. Rotate any credential that has ever been committed.
 
-Production settings fail early unless PostgreSQL, secret, a Render-provided or explicitly configured host, HTTPS frontend/CSRF origins, SMTP, and HTTPS frontend URL are configured. `/health` returns `200` only when Django can connect to the configured database and otherwise returns `503`. `/version` returns only the configured release label and Git commit; it does not disclose secrets.
+Production settings fail early unless PostgreSQL, secret, a Render-provided or explicitly configured host, HTTPS frontend/CSRF origins, and HTTPS frontend URL are configured. SMTP settings are required when email verification is enabled. `/health` returns `200` only when Django can connect to the configured database and otherwise returns `503`. `/version` returns only the configured release label and Git commit; it does not disclose secrets.
 
 ## Pinnacle/cPanel Setup To Confirm
 

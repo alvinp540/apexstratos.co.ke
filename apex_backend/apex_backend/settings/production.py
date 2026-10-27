@@ -5,6 +5,10 @@ from urllib.parse import urlparse
 from django.core.exceptions import ImproperlyConfigured
 
 DEBUG = False
+REQUIRE_EMAIL_VERIFICATION = env_bool(
+    'REQUIRE_EMAIL_VERIFICATION',
+    default=True,
+)
 
 FIRST_PARTY_FRONTEND_ORIGINS = (
     'https://apexstratos.courses',
@@ -70,10 +74,11 @@ if not ALLOWED_HOSTS or any('*' in host or '://' in host or '/' in host for host
 CORS_ALLOWED_ORIGINS = required_origins('CORS_ALLOWED_ORIGINS')
 CSRF_TRUSTED_ORIGINS = required_origins('CSRF_TRUSTED_ORIGINS')
 
-EMAIL_HOST = required_setting('EMAIL_HOST')
-EMAIL_HOST_USER = required_setting('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = required_setting('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = required_setting('DEFAULT_FROM_EMAIL')
+if REQUIRE_EMAIL_VERIFICATION:
+    EMAIL_HOST = required_setting('EMAIL_HOST')
+    EMAIL_HOST_USER = required_setting('EMAIL_HOST_USER')
+    EMAIL_HOST_PASSWORD = required_setting('EMAIL_HOST_PASSWORD')
+    DEFAULT_FROM_EMAIL = required_setting('DEFAULT_FROM_EMAIL')
 
 FRONTEND_URL = required_setting('FRONTEND_URL')
 if urlparse(FRONTEND_URL).scheme != 'https' or not urlparse(FRONTEND_URL).netloc:
