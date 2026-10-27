@@ -44,11 +44,20 @@ if SECRET_KEY == 'dev-insecure-fallback-key-do-not-use-in-production':
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in required_setting('ALLOWED_HOSTS').split(',')
+    for host in os.environ.get('ALLOWED_HOSTS', '').split(',')
     if host.strip()
 ]
+render_external_hostname = os.environ.get(
+    'RENDER_EXTERNAL_HOSTNAME', ''
+).strip()
+if render_external_hostname:
+    ALLOWED_HOSTS.insert(0, render_external_hostname)
+
 if not ALLOWED_HOSTS or any('*' in host or '://' in host or '/' in host for host in ALLOWED_HOSTS):
-    raise ImproperlyConfigured('ALLOWED_HOSTS must contain explicit production hostnames.')
+    raise ImproperlyConfigured(
+        'Set ALLOWED_HOSTS or deploy on Render with '
+        'RENDER_EXTERNAL_HOSTNAME configured. Use explicit production hostnames.'
+    )
 
 CORS_ALLOWED_ORIGINS = required_origins('CORS_ALLOWED_ORIGINS')
 CSRF_TRUSTED_ORIGINS = required_origins('CSRF_TRUSTED_ORIGINS')

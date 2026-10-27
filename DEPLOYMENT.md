@@ -65,7 +65,8 @@ The `--apply` and `--publish` options must not be used against production withou
 Set these in the hosting platform's protected environment-variable UI, not in Git:
 
 - `DJANGO_SECRET_KEY`: newly generated production-only secret.
-- `ALLOWED_HOSTS`: comma-separated production backend hostnames; wildcards are rejected.
+- `RENDER_EXTERNAL_HOSTNAME`: Render supplies the service hostname automatically and production settings add it to Django's allowed hosts.
+- `ALLOWED_HOSTS`: optional comma-separated explicit hostnames, such as a custom backend domain; required when not running on Render. Wildcards are rejected.
 - `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`: comma-separated HTTPS origins.
 - `DATABASE_URL`: required PostgreSQL connection URL. Production startup rejects SQLite and MySQL; keep credentials in the protected environment configuration.
 - `EMAIL_HOST`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`: required production SMTP configuration.
@@ -77,7 +78,7 @@ Set these in the hosting platform's protected environment-variable UI, not in Gi
 
 `apex_backend/.env.example` and `apex_frontend/.env.example` contain names only. Never upload local `.env` files or add secret values to GitHub. Rotate any credential that has ever been committed.
 
-Production settings fail early unless PostgreSQL, secret, explicit hosts, HTTPS frontend/CSRF origins, SMTP, and HTTPS frontend URL are configured. `/health` returns `200` only when Django can connect to the configured database and otherwise returns `503`. `/version` returns only the configured release label and Git commit; it does not disclose secrets.
+Production settings fail early unless PostgreSQL, secret, a Render-provided or explicitly configured host, HTTPS frontend/CSRF origins, SMTP, and HTTPS frontend URL are configured. `/health` returns `200` only when Django can connect to the configured database and otherwise returns `503`. `/version` returns only the configured release label and Git commit; it does not disclose secrets.
 
 ## Pinnacle/cPanel Setup To Confirm
 
