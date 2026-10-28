@@ -578,7 +578,7 @@ class StartAssessmentView(APIView):
             amount_expected=100,
         ).exists():
             return Response(
-                {'error': 'Verified KSh 100 main contest payment is required before starting this assessment.'},
+                {'error': 'Verified KSh 20 main contest payment is required before starting this assessment.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
         question_ids = list(assessment.questions.values_list('id', flat=True))

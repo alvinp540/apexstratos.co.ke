@@ -737,7 +737,7 @@ class SponsoredViewAttempt(models.Model):
 
 class ParticipationPayment(models.Model):
     """
-    Tracks KSh 100 participation payments for accessing assessments.
+    Tracks KSh 20 participation payments for accessing assessments.
     Payment is a gating mechanism only; payment does not create merit or improve ranking.
     Separate from escrow, coaching payouts, and subscription tiers.
     """
@@ -755,7 +755,7 @@ class ParticipationPayment(models.Model):
     full_name = models.CharField(max_length=200, blank=True)
     phone_number = models.CharField(max_length=32, blank=True)
     field = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
-    amount_kes = models.PositiveIntegerField(default=100)
+    amount_kes = models.PositiveIntegerField(default=20)
     till_number = models.CharField(max_length=20, default='1598106')
     payment_reference = models.CharField(max_length=255, blank=True, null=True, unique=True)
     mpesa_transaction_id = models.CharField(max_length=255, blank=True, null=True, unique=True)

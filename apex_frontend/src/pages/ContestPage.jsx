@@ -294,7 +294,7 @@ export default function ContestPage() {
         phone_number: phone,
         field: paymentForm.field,
         program: 'main_contest',
-        amount_kes: 100,
+        amount_kes: 20,
         payment_reference: paymentForm.payment_reference.trim(),
       })
       setPaymentSubmitted(true)
@@ -356,7 +356,7 @@ export default function ContestPage() {
 
   return <Page eyebrow="PRACTICE & CHALLENGE" title="Main contests" description="Contest assessments and payment requests shown here come from Apex. The server controls access, contest windows, attempt deadlines, and scores.">
     <section className="panel contest-library-panel">
-      <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST LIBRARY</div><h2>KSh 100 per applicable access period</h2><p>Each published assessment contains ten questions. Payment verification grants field-specific access; the five-minute timer starts only when the server accepts your start action during the Friday–Sunday window.</p></div><span className="contest-price">{libraryCount} matching</span></div>
+      <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST LIBRARY</div><h2>KSh 20 per applicable access period</h2><p>Each published assessment contains ten questions. Payment verification grants field-specific access; the five-minute timer starts only when the server accepts your start action during the Friday–Sunday window.</p></div><span className="contest-price">{libraryCount} matching</span></div>
       <WeeklyScheduleNotice activity="main_contest" />
       <div className="filter-row"><label>Study area<select value={libraryFilters.field} onChange={(event) => setLibraryFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All study areas</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label><label>Week<select value={libraryFilters.week} onChange={(event) => setLibraryFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={libraryFilters.topic} onChange={(event) => setLibraryFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label><button className="button button-quiet" onClick={loadLibrary}>↻ Refresh library</button></div>
       {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <div className="content-grid">{libraryItems.map((assessment) => {
@@ -367,7 +367,7 @@ export default function ContestPage() {
             <h3>{assessment.title}</h3><p>{assessment.description}</p>
             <ContestSponsorships sponsorships={assessment.sponsorships} />
           </div>
-          {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 100 payment is verified for this study area. <a href="#contest-payment-form">Go to payment form.</a></p>}
+          {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 20 payment is verified for this study area. <a href="#contest-payment-form">Go to payment form.</a></p>}
           <div className="tutorial-meta"><span>10 questions · 5 minutes maximum · KSh {assessment.access_price_kes}</span><span>{assessment.attempt?.status === 'graded' ? `Completed · ${assessment.attempt.score}%` : assessment.attempt?.status === 'timed_out' ? `Timed out · ${assessment.attempt.score ?? 'processing'}%` : assessment.can_start ? 'Available now · EAT' : `Next opening: ${formatDate(assessment.next_opening_at)}`}</span></div>
           {(!assessment.attempt || ['in_progress', 'timed_out'].includes(assessment.attempt.status)) && <button className="button button-primary" disabled={!assessment.can_start && assessment.attempt?.status !== 'in_progress' && assessment.attempt?.status !== 'timed_out'} onClick={() => startContest(assessment)}>{assessment.attempt?.status === 'in_progress' ? 'Resume assessment' : assessment.attempt?.status === 'timed_out' ? 'View finalized result' : assessment.can_start ? 'Start assessment' : locked ? 'Requires verified payment and Friday–Sunday access' : 'Available Friday–Sunday'}</button>}
           {assessment.attempt?.status === 'graded' && assessment.attempt.questions?.length > 0 && <details className="contest-answer-review"><summary>Review answers and explanations</summary><ol>{assessment.attempt.questions.map((question) => <li key={question.id}><strong>{question.prompt}</strong><p>Your answer: {question.selected_answer || 'No answer submitted'}</p><p>Correct answer: {question.correct_answer}</p><p>{question.rationale}</p></li>)}</ol></details>}
@@ -375,7 +375,7 @@ export default function ContestPage() {
       })}</div>}
     </section>
     <section className="panel contest-payment-panel">
-      <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST ACCESS</div><h2>Payment review</h2><p>Submit your KSh 100 M-Pesa reference for the official study area you want to enter. Payment is reviewed by an administrator and does not add merit.</p></div><span className="contest-price">KES 100</span></div>
+      <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST ACCESS</div><h2>Payment review</h2><p>Submit your KSh 20 M-Pesa reference for the official study area you want to enter. Payment is reviewed by an administrator and does not add merit.</p></div><span className="contest-price">KES 20</span></div>
       {errors.profile && <div className="alert alert-error" role="alert">Profile details could not be loaded. Your registered phone and name will be validated by the server when you submit.</div>}
       {errors.payments && <ErrorState message={errors.payments} retry={load} />}
       <div className="contest-payment-layout">
@@ -387,7 +387,7 @@ export default function ContestPage() {
           <small id="contest-phone-note" className="contest-help">{phone ? 'This number is sent as registered and cannot be changed here.' : <>Add a phone number to your <Link to="/profile">profile</Link> before submitting payment.</>}</small>
           <label>Official study area<select value={paymentForm.field} onChange={(event) => setPaymentForm({ ...paymentForm, field: event.target.value })} required><option value="">Choose a study area</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label>
           <label>M-Pesa transaction reference<input value={paymentForm.payment_reference} onChange={(event) => setPaymentForm({ ...paymentForm, payment_reference: event.target.value })} required minLength={5} autoComplete="off" /></label>
-          <div className="contest-payment-instructions"><strong>Pay KSh 100 to the official Apex Till.</strong><span>Use Till number 1598106. Keep your transaction confirmation; an admin verifies the reference before the platform makes contest assessments available.</span></div>
+          <div className="contest-payment-instructions"><strong>Pay KSh 20 to the official Apex Till.</strong><span>Use Till number 1598106. Keep your transaction confirmation; an admin verifies the reference before the platform makes contest assessments available.</span></div>
           <button className="button button-primary" disabled={paymentBusy || !phone}>{paymentBusy ? 'Submitting…' : 'Submit payment reference'} <span>↗</span></button>
         </form>
         <div className="contest-payment-status"><div className="panel-heading"><h3>Your payment requests</h3>{!loading && <button className="text-button" onClick={load}>↻ Refresh</button>}</div>

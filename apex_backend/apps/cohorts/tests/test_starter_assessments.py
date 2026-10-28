@@ -191,7 +191,7 @@ class StarterAssessmentJourneyTests(TestCase):
             full_name='Starter Student',
             phone_number='0712345678',
             field='Software Development',
-            amount_kes=100,
+            amount_kes=20,
             till_number='1598106',
             payment_reference='STARTERCONTEST1',
             mpesa_transaction_id='STARTERCONTESTTXN1',

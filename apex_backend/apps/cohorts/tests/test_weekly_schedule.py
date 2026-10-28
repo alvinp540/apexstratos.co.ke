@@ -305,7 +305,7 @@ class MainContestScheduleAccessTests(TestCase):
         ParticipationPayment.objects.create(
             user=self.user,
             field='Software Development',
-            amount_kes=100,
+            amount_kes=20,
             payment_reference='WEEKLYCONTEST1',
             mpesa_transaction_id='WEEKLYCONFIRM1',
             status='verified',

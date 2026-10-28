@@ -200,8 +200,8 @@ class ParticipationPaymentSubmissionSerializer(serializers.ModelSerializer):
         return user_phone
 
     def validate_amount_kes(self, value):
-        if value != 100:
-            raise serializers.ValidationError('Main contest access costs KSh 100.')
+        if value != 20:
+            raise serializers.ValidationError('Main contest access costs KSh 20.')
         return value
 
     def validate_payment_reference(self, value):
@@ -378,7 +378,7 @@ class ParticipationPaymentDecisionView(APIView):
                         status=status.HTTP_409_CONFLICT,
                     )
                 if decision == 'verified' and (
-                    payment.amount_kes != 100 or payment.till_number != '1598106'
+                    payment.amount_kes != 20 or payment.till_number != '1598106'
                 ):
                     return Response(
                         {'error': 'The payment amount or Till number does not match the main contest programme.'},
@@ -412,7 +412,7 @@ class ParticipationPaymentDecisionView(APIView):
                 if decision in ('verified', 'rejected'):
                     title = 'Main contest payment verified' if decision == 'verified' else 'Main contest payment not verified'
                     message = (
-                        'Your KSh 100 main contest payment was verified. Access is now available for '
+                        'Your KSh 20 main contest payment was verified. Access is now available for '
                         f'{payment.field} assessments during their published contest windows.'
                         if decision == 'verified'
                         else f'Your main contest payment request was rejected. {payment.rejection_reason}'
@@ -549,7 +549,7 @@ class ContestLibraryView(APIView):
                 'scheduled_for': assessment.scheduled_for,
                 'question_count': 10,
                 'duration_minutes': 20,
-                'access_price_kes': 100,
+                'access_price_kes': 20,
                 'has_verified_access': entitled,
                 'can_start': entitled and window is not None,
                 'window_closes_at': window[1] if window else None,

@@ -85,7 +85,7 @@ class MainContestAccessTests(APITestCase):
             'phone_number': '0712345678',
             'field': 'Software Development',
             'program': 'main_contest',
-            'amount_kes': 100,
+            'amount_kes': 20,
             'payment_reference': reference,
         }
 
@@ -125,7 +125,7 @@ class MainContestAccessTests(APITestCase):
             full_name='Student One',
             phone_number='0712345678',
             field='Software Development',
-            amount_kes=100,
+            amount_kes=20,
             till_number='1598106',
             payment_reference='AB123CD',
             mpesa_transaction_id='CONFIRMED1',
@@ -171,7 +171,7 @@ class MainContestAccessTests(APITestCase):
         assessment = response.data['results'][0]
         self.assertEqual(assessment['week'], 5)
         self.assertEqual(assessment['question_count'], 10)
-        self.assertEqual(assessment['access_price_kes'], 100)
+        self.assertEqual(assessment['access_price_kes'], 20)
         self.assertFalse(assessment['has_verified_access'])
         self.assertNotIn('video_url', assessment)
         self.assertNotIn('correct_answer', assessment)
@@ -227,6 +227,17 @@ class MainContestAccessTests(APITestCase):
         self.assertEqual(response.data['till_number'], '1598106')
         self.assertEqual(ParticipationPaymentEvent.objects.get().decision, 'submitted')
         self.assertFalse(ParticipationPayment.objects.filter(status='verified').exists())
+
+    def test_main_contest_payment_request_rejects_any_amount_other_than_kes_20(self):
+        response = self.client.post(
+            reverse('main-contest-payment-list'),
+            {**self.payment_data(), 'amount_kes': 100},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('KSh 20', str(response.data))
+        self.assertEqual(ParticipationPayment.objects.count(), 0)
 
     def test_duplicate_payment_reference_is_rejected(self):
         first = self.client.post(

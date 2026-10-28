@@ -596,21 +596,21 @@ class PublishedAssessmentLibraryIntegrationTests(TestCase):
         )
         self.assertFalse(unpaid_contest['has_verified_access'])
         self.assertFalse(unpaid_contest['can_start'])
-        self.assertEqual(unpaid_contest['access_price_kes'], 100)
+        self.assertEqual(unpaid_contest['access_price_kes'], 20)
         friday = datetime(2026, 10, 16, 10, tzinfo=self.eat)
         ParticipationPayment.objects.create(
             user=student,
             full_name='Assessment Library Learner',
             phone_number='0712345678',
             field='Education',
-            amount_kes=100,
+            amount_kes=20,
             till_number='1598106',
             payment_reference='CONTENT-TEST-MAIN-01',
             mpesa_transaction_id='CONTENT-TEST-TXN-01',
             status='verified',
             verification_notes='Verified test fixture for a published assessment start.',
             verified_at=friday,
-            expires_at=friday + timedelta(days=3),
+            expires_at=friday + timedelta(days=370),
         )
         with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
             contest_start = client.post(
