@@ -28,6 +28,7 @@ from .models import (
 	SupportApplicationEvent,
 	SponsoredViewAssessment,
 	SponsoredViewQuestion,
+	SponsoredViewAttempt,
 	SponsoredViewPayment,
 )
 from .allocation import allocate_cohort_rewards
@@ -412,7 +413,8 @@ class SponsoredViewAssessmentAdmin(admin.ModelAdmin):
 	actions = ('publish_content', 'archive_content')
 	fields = (
 		'week', 'slot', 'field', 'title', 'description', 'learning_objectives',
-		'duration_minutes', 'difficulty', 'expert_reviewed', 'imported_external_id',
+		'duration_minutes', 'difficulty', 'reward_minimum_score', 'reward_primary_score',
+		'expert_reviewed', 'imported_external_id',
 		'content_source', 'content_license', 'content_attribution', 'status',
 		'created_by', 'reviewed_by', 'created_at', 'updated_at', 'published_at',
 	)
@@ -428,7 +430,7 @@ class SponsoredViewAssessmentAdmin(admin.ModelAdmin):
 
 	def has_change_permission(self, request, obj=None):
 		return self.has_module_permission(request) and not (
-			obj is not None and obj.attempts.exists()
+			obj is not None and (obj.attempts.exists() or obj.payments.exists())
 		)
 
 	def has_delete_permission(self, request, obj=None):
@@ -497,6 +499,7 @@ class SponsoredViewPaymentAdmin(admin.ModelAdmin):
 
 	def has_delete_permission(self, request, obj=None):
 		return False
+
 
 	def save_model(self, request, obj, form, change):
 		if not change and not obj.created_by_id:
@@ -600,6 +603,37 @@ class SponsoredViewPaymentAdmin(admin.ModelAdmin):
 		cls._validate_approval(assessment)
 
 
+@admin.register(SponsoredViewAttempt)
+class SponsoredViewAttemptAdmin(admin.ModelAdmin):
+	list_display = ('user', 'assessment', 'status', 'score', 'is_flagged', 'submitted_at')
+	list_filter = ('status', 'assessment__field', 'is_flagged', 'submitted_at')
+	search_fields = ('user__email', 'user__username', 'assessment__title')
+	readonly_fields = (
+		'user', 'payment', 'assessment', 'question_snapshot', 'answers', 'score',
+		'status', 'started_at', 'deadline_at', 'submitted_at', 'created_at',
+	)
+	fields = (
+		'user', 'payment', 'assessment', 'status', 'score', 'question_snapshot',
+		'answers', 'started_at', 'deadline_at', 'submitted_at', 'created_at',
+		'is_flagged', 'flag_reason',
+	)
+
+	def has_module_permission(self, request):
+		return bool(request.user.is_authenticated and request.user.is_admin)
+
+	def has_view_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_add_permission(self, request):
+		return False
+
+	def has_change_permission(self, request, obj=None):
+		return self.has_module_permission(request)
+
+	def has_delete_permission(self, request, obj=None):
+		return False
+
+
 @admin.register(ParticipationPayment)
 class ParticipationPaymentAdmin(admin.ModelAdmin):
 	list_display = ('user', 'field', 'amount_kes', 'status', 'created_at', 'verified_at')
@@ -700,14 +734,14 @@ class AssessmentScheduleAttemptAdmin(admin.ModelAdmin):
 
 @admin.register(SupportProgram)
 class SupportProgramAdmin(admin.ModelAdmin):
-	list_display = ('title', 'program_type', 'merit_cutoff', 'funding_status', 'status', 'deadline')
+	list_display = ('title', 'program_type', 'award_amount_kes', 'merit_cutoff', 'funding_status', 'status', 'deadline')
 	list_filter = ('program_type', 'funding_status', 'status')
 	search_fields = ('title', 'description', 'eligibility_rules')
 	readonly_fields = ('created_by', 'created_at', 'updated_at')
 	fieldsets = (
 		('Programme', {'fields': ('title', 'description', 'program_type', 'status', 'deadline')}),
 		('Published eligibility and funding', {'fields': (
-			'eligibility_rules', 'merit_cutoff', 'eligibility_config', 'funding_status',
+			'eligibility_rules', 'merit_cutoff', 'award_amount_kes', 'eligibility_config', 'funding_status',
 		)}),
 		('Application form', {'fields': ('application_fields',)}),
 		('Record', {'fields': ('created_by', 'created_at', 'updated_at')}),

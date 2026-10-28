@@ -48,6 +48,32 @@ The module exposes authenticated onboarding and dashboard endpoints under `/api/
 
 Campaign budgets are proposed/approved amounts only. Billing, payment processing, invoices, spending ledgers and financial callbacks are not enabled; do not treat approved budget figures as payments or campaign spend. Campaign analytics count deduplicated, authenticated platform events and suppress aggregate reports below five unique authenticated viewers. The PostgreSQL migration and production document-storage persistence must be verified in the target environment before rollout.
 
+## Sponsored Rewards and Monthly Merit Sponsorships
+
+Sponsored View reward settlement reuses administrator-verified KES 20 Sponsored View payments and their completed, unflagged assessment attempts. A student's payment is counted once per tutorial/day, and the assessment score controls eligibility and ranking; payment alone cannot win. The default reward thresholds are a 70% minimum eligibility score and 90% primary threshold. Administrators configure these on the assessment before attempts begin; assessment editing is locked once attempts exist. Ties resolve by score descending, submission time ascending, then student UUID ascending.
+
+Each settlement uses the Africa/Nairobi calendar day, allocates half of eligible revenue to the platform and half to the reward pool, issues whole KES 100 awards only, and retains any remainder in the recorded reserve. The management command is safe to rerun for the same assessment and date:
+
+```powershell
+python manage.py settle_sponsored_rewards --date 2026-10-27 --settings=apex_backend.settings.production
+```
+
+For Render, configure a Cron Job using the backend root directory, the production environment, and `python manage.py settle_sponsored_rewards --settings=apex_backend.settings.production`. Run daily at 21:15 UTC (00:15 the following day in Nairobi); the command settles the previous EAT date by default. Keep this as a separate Cron Job; do not run settlement from every web or worker startup. Before enabling it, deploy the additive cohorts migrations and verify the first result through the admin dashboard. Settlement errors are recorded for retries. Refunds after settlement create separate reversal adjustments and never rewrite finalized settlement totals; if an already paid award is reversed, the adjustment flags manual payout recovery for reconciliation.
+
+Deploy the additive database schema after taking a production PostgreSQL backup:
+
+```powershell
+python manage.py migrate --settings=apex_backend.settings.production
+```
+
+Do not enable the Render Cron Job until the migrations have succeeded and the student/admin reward pages have been checked against the production API.
+
+Student reward history and claim submission are available at `/api/v1/cohorts/rewards/` and `/rewards`. Students pay the KES 20 participation fee to the company M-Pesa Till and submit their transaction reference; an administrator checks the incoming Till transaction and confirms the payment before it qualifies for settlement. Admin settlement and claim review are in **Admin tools → Rewards & Payouts**. Before payout, an authorized administrator confirms the stored merit score against the eligible graded attempt and queues the approved claim. Claims pay only to the phone already registered to the account. Outgoing M-Pesa transfers are manual because the application has no configured disbursement provider: complete the transfer through the approved external process, then enter the confirmed provider reference and reconciliation note. A claim or queued payout is not marked paid by itself.
+
+The backend payout adapter contract is `apps.cohorts.payouts.RewardPayoutProvider`: implementations must provide `transfer` and `lookup`, and use the claim UUID returned as `payout_idempotency_key` for retries. Set `REWARD_PAYOUT_PROVIDER` only after an implementation has been reviewed and tested against the provider sandbox. The default adapter raises an error and never simulates a successful transfer.
+
+Monthly cash sponsorship opportunities remain separate from daily rewards. Authorized administrators can configure KES 20,000 or KES 90,000 on a `cash_award` Support Program; the selected amount and merit cutoff are snapshotted on each application. Existing eligibility, application review, funding status, and manual payment confirmation remain the approval process. Reaching a cutoff does not automatically award or pay a sponsorship.
+
 Do not run seed, reset, flush or deletion commands against production.
 
 ## Assessment Content Import Status

@@ -23,6 +23,7 @@ from .models import (
 from .tutorial_schedule import CAPABILITY_FIELDS
 from .views import _get_client_ip
 from .weekly_schedule import (
+    ASSESSMENT_DURATION_SECONDS,
     EAT,
     activity_window,
     attempt_deadline as weekly_attempt_deadline,
@@ -56,8 +57,7 @@ def _assessment_is_ready(assessment):
 
 
 def _attempt_deadline(started_at, duration_seconds, contest_deadline):
-    attempt_deadline = started_at + timedelta(seconds=duration_seconds)
-    return min(attempt_deadline, contest_deadline)
+    return started_at + timedelta(seconds=duration_seconds)
 
 
 def _snapshot(assessment):
@@ -107,7 +107,7 @@ def _attempt_response(attempt):
                     'rationale': question['rationale'],
                     'selected_answer': answers.get(question['id']),
                 }
-                if attempt.status == 'graded'
+                if attempt.status in {'graded', 'timed_out'}
                 else {}
             ),
         }
@@ -133,6 +133,25 @@ def _attempt_response(attempt):
         'time_remaining': remaining,
         'is_flagged': attempt.is_flagged,
     }
+
+
+def _finalize_contest_timeout(attempt, completed_at):
+    if attempt.status != 'in_progress':
+        return attempt
+    questions = attempt.assessment_snapshot.get('questions', [])
+    score = round(100 * sum(
+        (value.get('answer', '') if isinstance(value, dict) else value) == question['correct_answer']
+        for question in questions
+        for question_id, value in attempt.answers.items()
+        if str(question_id) == question['id']
+    ) / max(len(questions), 1), 2)
+    attempt.score = score
+    attempt.status = 'timed_out'
+    attempt.submitted_at = completed_at
+    attempt.save(update_fields=('score', 'status', 'submitted_at'))
+    from .support_views import sync_support_eligibilities_for_user
+    sync_support_eligibilities_for_user(attempt.user)
+    return attempt
 
 
 class ParticipationPaymentSubmissionSerializer(serializers.ModelSerializer):
@@ -552,6 +571,15 @@ class StartContestAssessmentView(APIView):
                 status__in=('published', 'scheduled'),
             )
             now = timezone.now()
+            existing_attempt = AssessmentScheduleAttempt.objects.select_for_update().filter(
+                user=request.user, assessment=assessment,
+            ).first()
+            if existing_attempt:
+                if existing_attempt.status == 'in_progress' and (
+                    not existing_attempt.deadline_at or now >= existing_attempt.deadline_at
+                ):
+                    _finalize_contest_timeout(existing_attempt, now)
+                return Response(_attempt_response(existing_attempt))
             window = activity_window('main_contest', now)
             if not window:
                 return Response(
@@ -584,7 +612,7 @@ class StartContestAssessmentView(APIView):
                         for question in assessment.questions.order_by('order')
                     ],
                     'assessment_snapshot': _snapshot(assessment),
-                    'duration_seconds': assessment.duration_minutes * 60,
+                    'duration_seconds': ASSESSMENT_DURATION_SECONDS,
                     'ip_address': _get_client_ip(request),
                     'user_agent': request.META.get('HTTP_USER_AGENT', ''),
                 },
@@ -597,23 +625,14 @@ class StartContestAssessmentView(APIView):
                 )
                 attempt.save(update_fields=('deadline_at',))
             elif attempt.status != 'in_progress':
-                return Response(
-                    {'error': 'This assessment has already been submitted.'},
-                    status=status.HTTP_409_CONFLICT,
-                )
+                return Response(_attempt_response(attempt))
             elif not attempt.assessment_snapshot:
                 return Response(
                     {'error': 'This attempt has no preserved assessment version and cannot be safely resumed.'},
                     status=status.HTTP_409_CONFLICT,
                 )
             elif not attempt.deadline_at or now >= attempt.deadline_at:
-                attempt.status = 'timed_out'
-                attempt.submitted_at = now
-                attempt.save(update_fields=('status', 'submitted_at'))
-                return Response(
-                    {'error': 'The assessment deadline has expired.'},
-                    status=status.HTTP_410_GONE,
-                )
+                _finalize_contest_timeout(attempt, now)
         return Response(_attempt_response(attempt), status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -634,13 +653,8 @@ class SaveContestAttemptAnswersView(APIView):
                 )
             now = timezone.now()
             if not attempt.deadline_at or now >= attempt.deadline_at:
-                attempt.status = 'timed_out'
-                attempt.submitted_at = now
-                attempt.save(update_fields=('status', 'submitted_at'))
-                return Response(
-                    {'error': 'The assessment deadline has expired.'},
-                    status=status.HTTP_410_GONE,
-                )
+                _finalize_contest_timeout(attempt, now)
+                return Response(_attempt_response(attempt))
             answers = request.data.get('answers', {})
             reasoning = request.data.get('reasoning', {})
             if not isinstance(answers, dict) or not isinstance(reasoning, dict):
@@ -692,15 +706,13 @@ class SubmitContestAssessmentView(APIView):
                 id=attempt_id,
                 user=request.user,
             )
-            if attempt.status == 'graded':
+            if attempt.status in {'graded', 'timed_out'}:
                 from .support_views import sync_support_eligibilities_for_user
                 sync_support_eligibilities_for_user(attempt.user)
 
                 return Response({
-                    'attempt_id': str(attempt.id),
-                    'status': attempt.status,
-                    'score': attempt.score,
-                    'submitted_at': attempt.submitted_at,
+                    'attempt_id': str(attempt.id), 'status': attempt.status,
+                    'score': attempt.score, 'submitted_at': attempt.submitted_at,
                     'is_flagged': attempt.is_flagged,
                 })
 
@@ -711,13 +723,12 @@ class SubmitContestAssessmentView(APIView):
                 )
             now = timezone.now()
             if not attempt.deadline_at or now >= attempt.deadline_at:
-                attempt.status = 'timed_out'
-                attempt.submitted_at = now
-                attempt.save(update_fields=('status', 'submitted_at'))
-                return Response(
-                    {'error': 'The assessment deadline has expired.'},
-                    status=status.HTTP_410_GONE,
-                )
+                _finalize_contest_timeout(attempt, now)
+                return Response({
+                    'attempt_id': str(attempt.id), 'status': attempt.status,
+                    'score': attempt.score, 'submitted_at': attempt.submitted_at,
+                    'is_flagged': attempt.is_flagged,
+                })
 
             answers = request.data.get('answers')
             if not isinstance(answers, dict):
@@ -836,7 +847,7 @@ class MyContestCycleLeaderboardView(APIView):
     def get(self, request):
         attempts = AssessmentScheduleAttempt.objects.filter(
             user=request.user,
-            status='graded',
+            status__in=('graded', 'timed_out'),
             score__isnull=False,
             is_flagged=False,
             submitted_at__isnull=False,
@@ -869,7 +880,7 @@ class MyContestCycleLeaderboardView(APIView):
         cycle_attempts = list(
             AssessmentScheduleAttempt.objects.filter(
                 assessment__field=latest.assessment.field,
-                status='graded',
+                status__in=('graded', 'timed_out'),
                 score__isnull=False,
                 is_flagged=False,
                 submitted_at__gte=cycle_start,

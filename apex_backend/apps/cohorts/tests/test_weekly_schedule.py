@@ -15,6 +15,7 @@ from apps.cohorts.models import (
     ParticipationPayment,
     Tutorial,
     TutorialAttempt,
+    TutorialProgress,
     TutorialQuestion,
 )
 from apps.cohorts.weekly_schedule import (
@@ -47,7 +48,7 @@ class WeeklyScheduleRuleTests(TestCase):
         )
         self.assertEqual(
             attempt_deadline('tutorials', thursday_last_second),
-            friday_start,
+            thursday_last_second + timedelta(seconds=300),
         )
 
     def test_contest_window_ends_at_monday_midnight_and_tutorials_open(self):
@@ -59,7 +60,7 @@ class WeeklyScheduleRuleTests(TestCase):
         self.assertIsNotNone(activity_window('tutorials', monday_start))
         self.assertEqual(
             attempt_deadline('main_contest', sunday_last_second),
-            monday_start,
+            sunday_last_second + timedelta(seconds=300),
         )
 
     def test_weekly_status_returns_next_opening_and_current_boundary(self):
@@ -144,8 +145,12 @@ class TutorialScheduleAccessTests(TestCase):
             blocked = self.start()
 
         self.assertEqual(permitted.status_code, 201)
-        self.assertEqual(permitted.data['deadline_at'], eat_datetime(2026, 10, 16))
-        self.assertEqual(blocked.status_code, 403)
+        self.assertEqual(
+            permitted.data['deadline_at'],
+            thursday + timedelta(seconds=300),
+        )
+        self.assertEqual(blocked.status_code, 200)
+        self.assertEqual(blocked.data['status'], 'in_progress')
         self.assertEqual(TutorialAttempt.objects.count(), 1)
 
     def test_tutorial_is_available_without_a_scheduled_start_appointment(self):
@@ -164,7 +169,7 @@ class TutorialScheduleAccessTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(started.status_code, 201)
 
-    def test_tutorial_timer_uses_configured_duration_and_enforces_it_server_side(self):
+    def test_tutorial_attempt_has_five_minute_deadline_and_server_finalizes_saved_answers(self):
         started_at = eat_datetime(2026, 10, 12, 10)
         with patch('apps.cohorts.views.timezone.now', return_value=started_at):
             started = self.start()
@@ -172,11 +177,11 @@ class TutorialScheduleAccessTests(TestCase):
         self.assertEqual(started.status_code, 201)
         self.assertEqual(
             started.data['deadline_at'],
-            started_at + timedelta(minutes=30),
+            started_at + timedelta(seconds=300),
         )
         with patch(
             'apps.cohorts.views.timezone.now',
-            return_value=started_at + timedelta(minutes=30),
+            return_value=started_at + timedelta(seconds=300),
         ):
             expired = self.client.post(
                 reverse('tutorial-attempt-answers', kwargs={'attempt_id': started.data['id']}),
@@ -184,7 +189,9 @@ class TutorialScheduleAccessTests(TestCase):
                 format='json',
             )
 
-        self.assertEqual(expired.status_code, 410)
+        self.assertEqual(expired.status_code, 200)
+        self.assertEqual(expired.data['status'], 'timed_out')
+        self.assertEqual(expired.data['score'], 0)
 
     def test_resume_uses_same_attempt_and_original_deadline_then_times_out(self):
         started_at = eat_datetime(2026, 10, 15, 10)
@@ -211,17 +218,23 @@ class TutorialScheduleAccessTests(TestCase):
         answers = {item['id']: 'A' for item in started.data['questions']}
         with patch(
             'apps.cohorts.views.timezone.now',
-            return_value=eat_datetime(2026, 10, 16),
+            return_value=eat_datetime(2026, 10, 15, 10, 5),
         ):
             expired = self.client.post(submit_url, {'answers': answers}, format='json')
-        self.assertEqual(expired.status_code, 410)
+            repeated = self.client.post(submit_url, {'answers': answers}, format='json')
+        self.assertEqual(expired.status_code, 200)
+        self.assertEqual(expired.data['status'], 'timed_out')
+        self.assertEqual(expired.data['score'], 0)
+        self.assertEqual(repeated.data['score'], 0)
+        self.assertEqual(TutorialProgress.objects.get(user=self.user, tutorial=self.tutorial).attempt_count, 1)
         self.assertEqual(TutorialAttempt.objects.get().status, 'timed_out')
         with patch(
             'apps.cohorts.views.timezone.now',
             return_value=eat_datetime(2026, 10, 19, 10),
         ):
             restart = self.start()
-        self.assertEqual(restart.status_code, 409)
+        self.assertEqual(restart.status_code, 200)
+        self.assertEqual(restart.data['status'], 'timed_out')
         self.assertEqual(TutorialAttempt.objects.count(), 1)
 
     def test_graded_result_remains_readable_and_cannot_be_restarted(self):
@@ -334,7 +347,7 @@ class MainContestScheduleAccessTests(TestCase):
         self.assertEqual(started.data['started_at'], friday)
         self.assertEqual(
             started.data['deadline_at'],
-            friday + timedelta(minutes=20),
+            friday + timedelta(seconds=300),
         )
         self.assertEqual(AssessmentScheduleAttempt.objects.count(), 1)
 
@@ -345,7 +358,7 @@ class MainContestScheduleAccessTests(TestCase):
             started = self.start()
 
         self.assertEqual(started.status_code, 201)
-        self.assertEqual(started.data['deadline_at'], monday)
+        self.assertEqual(started.data['deadline_at'], sunday + timedelta(minutes=5))
         answer_question_id = started.data['questions'][0]['id']
         with patch('apps.cohorts.programme_views.timezone.now', return_value=monday):
             response = self.client.post(
@@ -354,7 +367,7 @@ class MainContestScheduleAccessTests(TestCase):
                 format='json',
             )
 
-        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
             AssessmentScheduleAttempt.objects.get().status,
             'timed_out',

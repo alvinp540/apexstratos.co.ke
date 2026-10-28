@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     CohortListView, CohortDetailView, CohortEnrollView,
-    CohortAssessmentsView, StartAssessmentView, SubmitAssessmentView,
+    CohortAssessmentsView, StartAssessmentView, SaveAssessmentAttemptAnswersView, SubmitAssessmentView,
     CohortLeaderboardView, HeartbeatView, DailyAvailableCohortsView,
     PSPRegistrationListView, PSPRegistrationDetailView, PSPVerifyView,
     AllocateCohortRewardsView,
@@ -41,8 +41,19 @@ from .sponsored_views import (
     SubmitSponsoredViewAttemptView,
 )
 from .review_views import AdminAssessmentReviewActionView, AdminAssessmentReviewListView
+from .rewards_views import (
+    AdminRewardClaimsView,
+    AdminRewardSettlementsView,
+    MyRewardClaimsView,
+    SubmitRewardClaimView,
+)
 
 urlpatterns = [
+    path('rewards/', MyRewardClaimsView.as_view(), name='my-sponsored-rewards'),
+    path('rewards/<uuid:claim_id>/claim/', SubmitRewardClaimView.as_view(), name='submit-sponsored-reward-claim'),
+    path('admin/rewards/settlements/', AdminRewardSettlementsView.as_view(), name='admin-reward-settlements'),
+    path('admin/rewards/claims/', AdminRewardClaimsView.as_view(), name='admin-reward-claims'),
+    path('admin/rewards/claims/<uuid:claim_id>/', AdminRewardClaimsView.as_view(), name='admin-reward-claim-decision'),
     path('admin/content/', AdminAssessmentReviewListView.as_view(), name='admin-assessment-review-list'),
     path('admin/content/<str:library>/<uuid:content_id>/', AdminAssessmentReviewActionView.as_view(), name='admin-assessment-review-action'),
     path('sponsored-view/assessments/', SponsoredViewAssessmentListView.as_view(), name='sponsored-view-assessment-list'),
@@ -81,6 +92,7 @@ urlpatterns = [
     path('<uuid:cohort_id>/assessments/', CohortAssessmentsView.as_view()),
     path('<uuid:cohort_id>/leaderboard/', CohortLeaderboardView.as_view()),
     path('assessments/<uuid:assessment_id>/start/', StartAssessmentView.as_view()),
+    path('assessment-attempts/<uuid:attempt_id>/answers/', SaveAssessmentAttemptAnswersView.as_view()),
     path('assessments/<uuid:assessment_id>/submit/', SubmitAssessmentView.as_view()),
     path('attempts/<uuid:attempt_id>/heartbeat/', HeartbeatView.as_view()),
     path('psp/registrations/', PSPRegistrationListView.as_view()),

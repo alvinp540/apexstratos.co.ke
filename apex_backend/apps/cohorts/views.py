@@ -29,7 +29,7 @@ from .anti_cheat import flag_attempt
 from apps.trust_engine.engine import recalculate_trust_score
 from apps.accounts.permissions import IsAdmin
 from .allocation import allocate_cohort_rewards
-from .weekly_schedule import activity_window, attempt_deadline, weekly_schedule
+from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, activity_window, attempt_deadline, weekly_schedule
 from utils.pagination import StandardResultsPagination
 
 
@@ -123,7 +123,7 @@ def _tutorial_attempt_response(attempt, *, reveal_answers=False):
             'options': question['options'],
             'requires_reasoning': question.get('requires_reasoning', False),
         }
-        if reveal_answers and attempt.status == 'graded':
+        if reveal_answers and attempt.status in {'graded', 'timed_out'}:
             item['correct_answer'] = question['correct_answer']
             item['rationale'] = question['rationale']
             item['selected_answer'] = answers.get(question['id'])
@@ -131,8 +131,9 @@ def _tutorial_attempt_response(attempt, *, reveal_answers=False):
         public_questions.append(item)
     now = timezone.now()
     try:
-        duration_seconds = (attempt.tutorial.duration_minutes or 20) * 60
-        deadline = attempt_deadline('tutorials', attempt.started_at, duration_seconds)
+        deadline = attempt.deadline_at or attempt_deadline(
+            'tutorials', attempt.started_at, ASSESSMENT_DURATION_SECONDS,
+        )
     except ValueError:
         deadline = None
     return {
@@ -152,6 +153,46 @@ def _tutorial_attempt_response(attempt, *, reveal_answers=False):
     }
 
 
+def _tutorial_deadline(attempt):
+    if attempt.deadline_at:
+        return attempt.deadline_at
+    deadline = attempt_deadline('tutorials', attempt.started_at, ASSESSMENT_DURATION_SECONDS)
+    attempt.deadline_at = deadline
+    attempt.save(update_fields=('deadline_at',))
+    return deadline
+
+
+def _finalize_tutorial_timeout(attempt, completed_at):
+    """Grade only autosaved answers and apply the same completion records once."""
+    if attempt.status != 'in_progress':
+        return attempt
+    answers = {}
+    for question_id, value in attempt.answers.items():
+        answers[str(question_id)] = value.get('answer', '') if isinstance(value, dict) else value
+    attempt.score = round(100 * sum(
+        answers.get(question['id']) == question['correct_answer']
+        for question in attempt.question_snapshot
+    ) / 10, 2)
+    attempt.status = 'timed_out'
+    attempt.submitted_at = completed_at
+    attempt.save(update_fields=('score', 'status', 'submitted_at'))
+
+    progress, _ = TutorialProgress.objects.select_for_update().get_or_create(
+        user=attempt.user, tutorial=attempt.tutorial,
+    )
+    progress.attempt_count += 1
+    progress.best_score = max(progress.best_score, attempt.score)
+    progress.completed_at = progress.completed_at or completed_at
+    progress.last_attempt = attempt
+    progress.save(update_fields=('attempt_count', 'best_score', 'completed_at', 'last_attempt', 'updated_at'))
+    from apps.vendor.campaign_views import record_tutorial_campaign_event
+    record_tutorial_campaign_event(attempt.user, attempt.tutorial, 'lesson_completion')
+    record_tutorial_campaign_event(attempt.user, attempt.tutorial, 'assessment_completion')
+    from .support_views import sync_support_eligibilities_for_user
+    sync_support_eligibilities_for_user(attempt.user)
+    return attempt
+
+
 class StartTutorialAttemptView(APIView):
     permission_classes = (IsAuthenticated,)
 
@@ -163,18 +204,12 @@ class StartTutorialAttemptView(APIView):
                 status__in=('published', 'scheduled'),
             )
             now = timezone.now()
-            window = activity_window('tutorials', now)
-            if window is None:
-                return Response(
-                    {'error': 'Tutorial assessments are available Monday through Thursday in EAT.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
             attempt = TutorialAttempt.objects.filter(
                 user=request.user,
                 tutorial=tutorial,
             ).order_by('-started_at').first()
             if attempt is not None:
-                if attempt.status == 'graded':
+                if attempt.status in {'graded', 'timed_out'}:
                     return Response(
                         _tutorial_attempt_response(attempt, reveal_answers=True),
                         status=status.HTTP_200_OK,
@@ -184,20 +219,19 @@ class StartTutorialAttemptView(APIView):
                         {'error': 'This tutorial attempt is no longer active.'},
                         status=status.HTTP_409_CONFLICT,
                     )
-                deadline = attempt_deadline(
-                    'tutorials',
-                    attempt.started_at,
-                    (tutorial.duration_minutes or 20) * 60,
-                )
+                deadline = _tutorial_deadline(attempt)
                 if now >= deadline:
-                    attempt.status = 'timed_out'
-                    attempt.submitted_at = now
-                    attempt.save(update_fields=('status', 'submitted_at'))
                     return Response(
-                        {'error': 'The tutorial deadline has expired.'},
-                        status=status.HTTP_410_GONE,
+                        _tutorial_attempt_response(_finalize_tutorial_timeout(attempt, now), reveal_answers=True),
                     )
                 return Response(_tutorial_attempt_response(attempt), status=status.HTTP_200_OK)
+
+            window = activity_window('tutorials', now)
+            if window is None:
+                return Response(
+                    {'error': 'Tutorial assessments are available Monday through Thursday in EAT.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
             if not _tutorial_is_ready(tutorial):
                 return Response(
@@ -225,6 +259,7 @@ class StartTutorialAttemptView(APIView):
                         tutorial=tutorial,
                         question_snapshot=snapshot,
                         started_at=now,
+                        deadline_at=attempt_deadline('tutorials', now, ASSESSMENT_DURATION_SECONDS),
                     )
             except IntegrityError:
                 attempt = TutorialAttempt.objects.get(
@@ -257,18 +292,10 @@ class SaveTutorialAttemptView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             now = timezone.now()
-            if now >= attempt_deadline(
-                'tutorials',
-                attempt.started_at,
-                (attempt.tutorial.duration_minutes or 20) * 60,
-            ):
-                attempt.status = 'timed_out'
-                attempt.submitted_at = now
-                attempt.save(update_fields=('status', 'submitted_at'))
-                return Response(
-                    {'error': 'The tutorial deadline has expired.'},
-                    status=status.HTTP_410_GONE,
-                )
+            if now >= _tutorial_deadline(attempt):
+                return Response(_tutorial_attempt_response(
+                    _finalize_tutorial_timeout(attempt, now), reveal_answers=True,
+                ))
 
             answers = request.data.get('answers', {})
             reasoning = request.data.get('reasoning', {})
@@ -322,25 +349,19 @@ class SubmitTutorialAttemptView(APIView):
                 from .support_views import sync_support_eligibilities_for_user
                 sync_support_eligibilities_for_user(attempt.user)
                 return Response(_tutorial_attempt_response(attempt, reveal_answers=True))
+            if attempt.status == 'timed_out':
+                return Response(_tutorial_attempt_response(attempt, reveal_answers=True))
             if attempt.status != 'in_progress':
                 return Response(
                     {'error': 'This tutorial attempt is no longer active.'},
                     status=status.HTTP_409_CONFLICT,
                 )
             now = timezone.now()
-            deadline = attempt_deadline(
-                'tutorials',
-                attempt.started_at,
-                (attempt.tutorial.duration_minutes or 20) * 60,
-            )
+            deadline = _tutorial_deadline(attempt)
             if now >= deadline:
-                attempt.status = 'timed_out'
-                attempt.submitted_at = now
-                attempt.save(update_fields=('status', 'submitted_at'))
-                return Response(
-                    {'error': 'The tutorial deadline has expired.'},
-                    status=status.HTTP_410_GONE,
-                )
+                return Response(_tutorial_attempt_response(
+                    _finalize_tutorial_timeout(attempt, now), reveal_answers=True,
+                ))
             answers = request.data.get('answers')
             question_map = {item['id']: item for item in attempt.question_snapshot}
             if not isinstance(answers, dict) or set(map(str, answers)) != set(question_map):
@@ -533,8 +554,16 @@ class CohortAssessmentsView(APIView):
 
 
 class StartAssessmentView(APIView):
+    @transaction.atomic
     def post(self, request, assessment_id):
-        assessment = get_object_or_404(Assessment, id=assessment_id, is_active=True)
+        assessment = get_object_or_404(Assessment.objects.select_for_update(), id=assessment_id)
+        existing = AssessmentAttempt.objects.select_for_update().filter(
+            user=request.user, assessment=assessment,
+        ).first()
+        if existing:
+            return Response(AssessmentAttemptSerializer(existing).data)
+        if not assessment.is_active:
+            return Response({'error': 'This assessment is not active.'}, status=status.HTTP_404_NOT_FOUND)
         if assessment.questions.count() != 10 or assessment.questions.exclude(question_type='mcq').exists():
             return Response(
                 {'error': 'This assessment is unavailable until it has exactly ten multiple-choice questions.'},
@@ -552,8 +581,6 @@ class StartAssessmentView(APIView):
                 {'error': 'Verified KSh 100 main contest payment is required before starting this assessment.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        if AssessmentAttempt.objects.filter(user=request.user, assessment=assessment).exists():
-            return Response({'error': 'Already attempted.'}, status=status.HTTP_400_BAD_REQUEST)
         question_ids = list(assessment.questions.values_list('id', flat=True))
         random.shuffle(question_ids)
         attempt = AssessmentAttempt.objects.create(
@@ -563,8 +590,45 @@ class StartAssessmentView(APIView):
             ip_address=_get_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
             question_order=[str(question_id) for question_id in question_ids],
+            deadline_at=timezone.now() + timedelta(seconds=ASSESSMENT_DURATION_SECONDS),
         )
         return Response(AssessmentAttemptSerializer(attempt).data, status=status.HTTP_201_CREATED)
+
+
+class SaveAssessmentAttemptAnswersView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, attempt_id):
+        with transaction.atomic():
+            attempt = get_object_or_404(
+                AssessmentAttempt.objects.select_for_update().select_related('assessment'),
+                id=attempt_id,
+                user=request.user,
+            )
+            if attempt.status != 'in_progress':
+                return Response({'error': 'This assessment attempt is finalized.'}, status=status.HTTP_409_CONFLICT)
+            now = timezone.now()
+            deadline = attempt.deadline_at or attempt.started_at + timedelta(seconds=ASSESSMENT_DURATION_SECONDS)
+            if now >= deadline:
+                return Response({'error': 'The assessment deadline has expired.'}, status=status.HTTP_410_GONE)
+            answers = request.data.get('answers', {})
+            if not isinstance(answers, dict):
+                return Response({'error': 'Answers must be a question-to-answer map.'}, status=status.HTTP_400_BAD_REQUEST)
+            questions = {
+                str(question.id): question
+                for question in attempt.assessment.questions.filter(id__in=attempt.question_order)
+            }
+            normalized = {}
+            for question_id, answer in answers.items():
+                question_id = str(question_id)
+                question = questions.get(question_id)
+                allowed = [str(option.get('id')) for option in question.options if isinstance(option, dict)] if question else []
+                if not question or str(answer) not in allowed:
+                    return Response({'error': 'One or more answers are invalid for this assessment.'}, status=status.HTTP_400_BAD_REQUEST)
+                normalized[question_id] = str(answer)
+            attempt.answers = normalized
+            attempt.save(update_fields=('answers',))
+        return Response(AssessmentAttemptSerializer(attempt).data)
 
 
 class SubmitAssessmentView(APIView):
@@ -572,24 +636,28 @@ class SubmitAssessmentView(APIView):
     def post(self, request, assessment_id):
         attempt = get_object_or_404(
             AssessmentAttempt.objects.select_for_update(), assessment_id=assessment_id,
-            user=request.user, status='in_progress',
+            user=request.user,
         )
-        if timezone.now() > attempt.started_at + timedelta(minutes=attempt.assessment.time_limit_minutes):
-            attempt.status = 'submitted'
-            attempt.submitted_at = timezone.now()
-            attempt.save(update_fields=['status', 'submitted_at'])
-            return Response({'error': 'Assessment time has expired.'}, status=status.HTTP_400_BAD_REQUEST)
-        answers = request.data.get('answers', {})
-        if not isinstance(answers, dict):
-            return Response({'error': 'Answers must be submitted as a question-to-answer map.'}, status=status.HTTP_400_BAD_REQUEST)
-        allowed_question_ids = set(attempt.question_order)
-        attempt.answers = {
-            str(question_id): answer
-            for question_id, answer in answers.items()
-            if str(question_id) in allowed_question_ids
-        }
-        attempt.submitted_at = timezone.now()
-        attempt.status = 'submitted'
+        if attempt.status in {'graded', 'timed_out'}:
+            return Response({'score': attempt.score, 'status': attempt.status, 'submitted_at': attempt.submitted_at})
+        if attempt.status != 'in_progress':
+            return Response({'error': 'This assessment attempt is no longer active.'}, status=status.HTTP_409_CONFLICT)
+        now = timezone.now()
+        deadline = attempt.deadline_at or attempt.started_at + timedelta(seconds=ASSESSMENT_DURATION_SECONDS)
+        timed_out = now >= deadline
+        if not timed_out:
+            answers = request.data.get('answers', {})
+            if not isinstance(answers, dict):
+                return Response({'error': 'Answers must be submitted as a question-to-answer map.'}, status=status.HTTP_400_BAD_REQUEST)
+            allowed_question_ids = set(attempt.question_order)
+            attempt.answers = {
+                str(question_id): answer
+                for question_id, answer in answers.items()
+                if str(question_id) in allowed_question_ids
+            }
+        # At or after the deadline only answers already persisted to the attempt are eligible.
+        attempt.submitted_at = now
+        attempt.status = 'timed_out' if timed_out else 'submitted'
         attempt.ip_address = _get_client_ip(request)
         attempt.save()
 
@@ -598,7 +666,7 @@ class SubmitAssessmentView(APIView):
         if result['flagged']:
             score = round(max(0, score * (1 - result['penalty_percent'] / 100)), 2)
         attempt.score = score
-        attempt.status = 'graded'
+        attempt.status = 'timed_out' if timed_out else 'graded'
         attempt.save(update_fields=['score', 'status'])
 
         # If score meets threshold, create a mentorship eligibility assignment
@@ -655,10 +723,12 @@ class SubmitAssessmentView(APIView):
             'score': score,
             'flagged': result['flagged'],
             'penalty_percent': result['penalty_percent'],
-            'message': (
+            'status': attempt.status,
+            'submitted_at': attempt.submitted_at,
+            'message': ('Time expired. Answers saved before the deadline were graded.' if timed_out else (
                 f"Assessment graded. A reasonable {result['penalty_percent']}% review deduction was applied."
                 if result['flagged'] else 'Assessment graded successfully.'
-            ),
+            )),
         })
 
 
@@ -666,7 +736,7 @@ class CohortLeaderboardView(APIView):
     def get(self, request, cohort_id):
         attempts = (
             AssessmentAttempt.objects
-            .filter(cohort_id=cohort_id, status='graded')
+            .filter(cohort_id=cohort_id, status__in=('graded', 'timed_out'))
             .select_related('user__profile', 'user__trust_score')
             .order_by('-score')[:50]
         )

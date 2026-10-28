@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import Navbar from '../components/common/Navbar'
 import CohortLeaderboard from '../components/cohorts/CohortLeaderboard'
 import QuestionCard from '../components/cohorts/QuestionCard'
 import AssessmentTimer from '../components/cohorts/AssessmentTimer'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import toast from 'react-hot-toast'
-import { getCohorts, enrollCohort, getAssessments, startAssessment, submitAssessment, sendHeartbeat } from '../api/cohortAPI'
+import { getCohorts, enrollCohort, getAssessments, startAssessment, submitAssessment, saveAssessmentAttemptAnswers, sendHeartbeat } from '../api/cohortAPI'
 import { listPSPRegistrations, createPSPRegistration } from '../api/pspAPI'
 import { Link } from 'react-router-dom'
 
@@ -19,6 +19,9 @@ export default function CohortsPage() {
   const [activeAttempt, setActiveAttempt] = useState(null)
   const [activeAssessment, setActiveAssessment] = useState(null)
   const [answers, setAnswers] = useState({})
+  const [submitting, setSubmitting] = useState(false)
+  const [attemptExpired, setAttemptExpired] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const [view, setView] = useState('list')
   const [pspRegistrations, setPspRegistrations] = useState([])
   const [tier, setTier] = useState('10kes')
@@ -82,23 +85,43 @@ export default function CohortsPage() {
       const { data } = await startAssessment(assessment.id)
       setActiveAttempt(data)
       setActiveAssessment(assessment)
-      setAnswers({})
+      setAnswers(data.answers || {})
+      setAttemptExpired(data.status !== 'in_progress')
       setView('assessment')
     } catch (err) {
       toast.error(err.response?.data?.error || 'Could not start assessment.')
     }
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
+    if (!activeAssessment || submitting) return
+    setSubmitting(true)
+    setSubmitError('')
     try {
       const { data } = await submitAssessment(activeAssessment.id, answers)
       toast.success(`${data.message} Score: ${data.score?.toFixed(1)}%`)
       setView('cohort')
       setActiveAttempt(null)
     } catch (err) {
+      setSubmitError(err.response?.data?.error || 'Submission status is unavailable. Retry to retrieve the final result.')
       toast.error(err.response?.data?.error || 'Submission failed.')
+    } finally {
+      setSubmitting(false)
     }
-  }
+  }, [activeAssessment, answers, submitting])
+
+  useEffect(() => {
+    if (!activeAttempt?.id || activeAttempt.status !== 'in_progress' || attemptExpired || submitting) return undefined
+    const timer = window.setTimeout(() => {
+      saveAssessmentAttemptAnswers(activeAttempt.id, answers).catch((err) => {
+        if (err.response?.status === 410) {
+          setAttemptExpired(true)
+          handleSubmit()
+        }
+      })
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [activeAttempt?.id, activeAttempt?.status, answers, attemptExpired, handleSubmit, submitting])
 
   if (loading) return <><Navbar /><LoadingSpinner /></>
 
@@ -171,7 +194,7 @@ export default function CohortsPage() {
                   <div key={a.title} className="card" style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15,23,42,0.78)', border: '1px solid rgba(148,163,184,0.12)' }}>
                     <div>
                       <div style={{ fontWeight: 600 }}>{a.title}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{a.difficulty || 'Intermediate'} · {a.time_limit_minutes || 15}min · Pass: {a.passing_score || 75}%</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{a.difficulty || 'Intermediate'} · 5 min maximum · Pass: {a.passing_score || 75}%</div>
                     </div>
                     <button onClick={() => handleStartAssessment(a)} className="btn-primary">Start</button>
                   </div>
@@ -192,8 +215,11 @@ export default function CohortsPage() {
                 <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.14em', color: '#a78bfa', fontWeight: 700 }}>{activeAttempt.question_order?.length || 0} questions</div>
                 <h2 style={{ marginTop: '0.25rem', fontSize: '2rem', fontWeight: 800 }}>{activeAssessment.title}</h2>
               </div>
-              <AssessmentTimer limitMinutes={activeAssessment.time_limit_minutes} startedAt={activeAttempt.started_at} onExpire={handleSubmit} />
+              <AssessmentTimer deadlineAt={activeAttempt.deadline_at} serverTime={activeAttempt.server_time} onExpire={() => { setAttemptExpired(true); handleSubmit() }} />
             </div>
+            {attemptExpired && <p role="status">Time expired. The server is finalizing answers saved before the deadline.</p>}
+            {(!activeAttempt.deadline_at || !activeAttempt.server_time) && <p role="alert">The server did not provide an attempt deadline. Reload the assessment before answering.</p>}
+            {submitError && <p role="alert">{submitError}</p>}
 
             <div style={{ background: 'rgba(15,23,42,0.82)', border: '1px solid rgba(148,163,184,0.12)', borderRadius: '1rem', padding: '1.3rem', marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.76rem', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700 }}>Assessment instructions</div>
@@ -202,10 +228,10 @@ export default function CohortsPage() {
             </div>
 
             {(activeAttempt.question_order || []).map((questionId) => activeAssessment.questions.find((q) => String(q.id) === questionId)).filter(Boolean).map((q, index) => (
-              <QuestionCard key={q.id || index} question={q} index={index} selected={answers[q.id || index]} onSelect={(qId, val) => setAnswers((prev) => ({ ...prev, [qId]: val }))} />
+              <QuestionCard key={q.id || index} question={q} index={index} selected={answers[q.id || index]} disabled={attemptExpired || !activeAttempt.deadline_at || !activeAttempt.server_time || activeAttempt.status !== 'in_progress' || submitting} onSelect={(qId, val) => setAnswers((prev) => ({ ...prev, [qId]: val }))} />
             ))}
 
-            <button onClick={handleSubmit} className="btn-primary" style={{ marginTop: '1rem', width: '100%' }}>Submit Assessment</button>
+            <button onClick={handleSubmit} disabled={submitting || (attemptExpired && !submitError) || activeAttempt.status !== 'in_progress'} className="btn-primary" style={{ marginTop: '1rem', width: '100%' }}>{submitting ? 'Submitting…' : attemptExpired ? 'Retry finalization' : 'Submit Assessment'}</button>
           </div>
         )}
       </div>

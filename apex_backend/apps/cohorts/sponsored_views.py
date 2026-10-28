@@ -1,7 +1,5 @@
-from datetime import datetime, time, timedelta
-
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -17,9 +15,13 @@ from .models import (
     ParticipationPayment,
     SponsoredViewAssessment,
     SponsoredViewAttempt,
+    SponsoredViewDailySettlement,
+    SponsoredViewRewardAward,
+    SponsoredViewRewardClaim,
+    SponsoredViewSettlementAdjustment,
     SponsoredViewPayment,
 )
-from .weekly_schedule import EAT, activity_window, attempt_deadline, next_opening
+from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, EAT, activity_window, attempt_deadline, next_opening
 
 
 class SponsoredViewPaymentInputSerializer(serializers.Serializer):
@@ -33,10 +35,11 @@ class SponsoredViewPaymentInputSerializer(serializers.Serializer):
 
 
 class SponsoredViewAdminDecisionSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(choices=('verified', 'rejected'))
+    status = serializers.ChoiceField(choices=('verified', 'rejected', 'cancelled', 'refunded'))
     mpesa_transaction_id = serializers.CharField(required=False, allow_blank=True, max_length=255)
     verification_notes = serializers.CharField(required=False, allow_blank=True, max_length=5000)
     rejection_reason = serializers.CharField(required=False, allow_blank=True, max_length=5000)
+    refund_reference = serializers.CharField(required=False, allow_blank=True, max_length=255)
 
 
 def _assessment_ready(assessment):
@@ -73,7 +76,7 @@ def _attempt_response(attempt):
             key: question[key]
             for key in ('id', 'order', 'prompt', 'options', 'requires_reasoning')
         }
-        if attempt.status == 'graded':
+        if attempt.status in {'graded', 'timed_out'}:
             item.update({
                 'correct_answer': question['correct_answer'],
                 'rationale': question['rationale'],
@@ -98,6 +101,25 @@ def _attempt_response(attempt):
         'time_remaining': max(0, int((attempt.deadline_at - now).total_seconds())),
         'submitted_at': attempt.submitted_at,
     }
+
+
+def _finalize_sponsored_view_timeout(attempt, completed_at):
+    if attempt.status != 'in_progress':
+        return attempt
+    questions = {question['id']: question for question in attempt.question_snapshot}
+    score = 0
+    for question_id, value in attempt.answers.items():
+        answer = value.get('answer', '') if isinstance(value, dict) else value
+        question = questions.get(str(question_id))
+        if question and answer == question['correct_answer']:
+            score += 10
+    attempt.score = round(score, 2)
+    attempt.status = 'timed_out'
+    attempt.submitted_at = completed_at
+    attempt.save(update_fields=('score', 'status', 'submitted_at'))
+    from .support_views import sync_support_eligibilities_for_user
+    sync_support_eligibilities_for_user(attempt.user)
+    return attempt
 
 
 class SponsoredViewAssessmentListView(APIView):
@@ -130,6 +152,14 @@ class SponsoredViewAssessmentListView(APIView):
 
         now = timezone.now()
         window = activity_window('sponsored_view', now)
+        active_counts = dict(
+            SponsoredViewPayment.objects.filter(
+                user=request.user,
+                status__in=('pending', 'verified'),
+            ).filter(
+                Q(attempt__isnull=True) | Q(attempt__status='in_progress', attempt__deadline_at__gt=now),
+            ).values('assessment__field').annotate(total=Count('id')).values_list('assessment__field', 'total')
+        )
         payments_by_assessment = {}
         for payment in SponsoredViewPayment.objects.filter(
             user=request.user,
@@ -158,6 +188,8 @@ class SponsoredViewAssessmentListView(APIView):
                 'question_count': 10,
                 'duration_minutes': assessment.duration_minutes,
                 'access_price_kes': 20,
+                'active_entries_for_capability': active_counts.get(assessment.field, 0),
+                'active_entry_limit': 5,
                 'has_verified_access': bool(verified_payment),
                 'can_start': bool(window and verified_payment),
                 'window_closes_at': window[1] if window else None,
@@ -214,24 +246,31 @@ class SponsoredViewPaymentCreateView(APIView):
                 {'error': 'This assessment is not published with ten valid questions and explanations.'},
                 status=status.HTTP_409_CONFLICT,
             )
-        local_day = now.astimezone(EAT).date()
-        day_start = timezone.make_aware(
-            timezone.datetime.combine(local_day, time.min),
-            EAT,
-        )
-        day_end = day_start + timedelta(days=1)
         with transaction.atomic():
             User.objects.select_for_update().get(id=request.user.id)
-            payments_today = SponsoredViewPayment.objects.select_for_update().filter(
+            duplicate_active_entry = SponsoredViewPayment.objects.filter(
                 user=request.user,
-                requested_at__gte=day_start,
-                requested_at__lt=day_end,
+                assessment=assessment,
                 status__in=('pending', 'verified'),
-            ).count()
-            if payments_today >= 5:
+            ).filter(
+                Q(attempt__isnull=True) | Q(attempt__status='in_progress', attempt__deadline_at__gt=now),
+            ).exists()
+            if duplicate_active_entry:
                 return Response(
-                    {'error': 'The limit is five paid Sponsored View attempts per student per EAT calendar day.'},
-                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    {'error': 'You already have an active entry for this assessment.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            active_entries = SponsoredViewPayment.objects.filter(
+                user=request.user,
+                assessment__field=assessment.field,
+                status__in=('pending', 'verified'),
+            ).filter(
+                Q(attempt__isnull=True) | Q(attempt__status='in_progress'),
+            ).count()
+            if active_entries >= 5:
+                return Response(
+                    {'error': f'You have reached the maximum of five active entries for {assessment.field}. You can continue participating in other capabilities.'},
+                    status=status.HTTP_409_CONFLICT,
                 )
             if (
                 SponsoredViewPayment.objects.filter(
@@ -315,15 +354,29 @@ class SponsoredViewPaymentDecisionView(APIView):
                 SponsoredViewPayment.objects.select_for_update().select_related('user', 'assessment'),
                 id=payment_id,
             )
-            if payment.status != 'pending':
+            is_refund = next_status == 'refunded'
+            if (is_refund and payment.status != 'verified') or (not is_refund and payment.status != 'pending'):
                 return Response(
-                    {'status': 'Only pending Sponsored View payments can be reviewed.'},
+                    {'status': 'Refund only a verified payment; other decisions apply only to pending payments.'},
                     status=status.HTTP_409_CONFLICT,
                 )
-            if next_status == 'rejected' and not data.get('rejection_reason', '').strip():
+            if next_status in {'rejected', 'cancelled', 'refunded'} and not data.get('rejection_reason', '').strip():
                 return Response(
-                    {'rejection_reason': 'Provide a reason for rejecting this payment.'},
+                    {'rejection_reason': 'Provide a reason for this payment decision.'},
                     status=status.HTTP_400_BAD_REQUEST,
+                )
+            refund_reference = data.get('refund_reference', '').strip()
+            if is_refund and not refund_reference:
+                return Response(
+                    {'refund_reference': 'Enter the confirmed M-Pesa refund reference.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if is_refund and SponsoredViewSettlementAdjustment.objects.filter(
+                refund_reference=refund_reference,
+            ).exists():
+                return Response(
+                    {'refund_reference': 'This refund reference is already recorded.'},
+                    status=status.HTTP_409_CONFLICT,
                 )
             transaction_id = data.get('mpesa_transaction_id', '').strip()
             if next_status == 'verified' and not transaction_id:
@@ -341,22 +394,9 @@ class SponsoredViewPaymentDecisionView(APIView):
                     {'mpesa_transaction_id': 'This M-Pesa transaction is already linked to another payment.'},
                     status=status.HTTP_409_CONFLICT,
                 )
-            local_day = payment.requested_at.astimezone(EAT).date()
-            day_start = timezone.make_aware(datetime.combine(local_day, time.min), EAT)
-            day_end = day_start + timedelta(days=1)
-            verified_today = SponsoredViewPayment.objects.filter(
-                user=payment.user,
-                requested_at__gte=day_start,
-                requested_at__lt=day_end,
-                status='verified',
-            ).count()
-            if next_status == 'verified' and verified_today >= 5:
-                return Response(
-                    {'status': 'The student has already reached five verified attempts for that EAT day.'},
-                    status=status.HTTP_409_CONFLICT,
-                )
             payment.status = next_status
-            payment.mpesa_transaction_id = transaction_id
+            if next_status == 'verified':
+                payment.mpesa_transaction_id = transaction_id
             payment.verification_notes = data.get('verification_notes', '').strip()
             payment.rejection_reason = data.get('rejection_reason', '').strip()
             if next_status == 'verified':
@@ -366,7 +406,55 @@ class SponsoredViewPaymentDecisionView(APIView):
                 'status', 'mpesa_transaction_id', 'verification_notes', 'rejection_reason',
                 'verified_by', 'verified_at',
             ))
-            title = 'Sponsored View payment verified' if next_status == 'verified' else 'Sponsored View payment not verified'
+            if is_refund:
+                award = SponsoredViewRewardAward.objects.select_for_update().filter(payment=payment).first()
+                claim = SponsoredViewRewardClaim.objects.select_for_update().filter(award=award).first() if award else None
+                settlement = None
+                if payment.verified_at:
+                    settlement_day = payment.verified_at.astimezone(EAT).date()
+                    settlement = SponsoredViewDailySettlement.objects.filter(
+                        assessment=payment.assessment,
+                        settlement_date=settlement_day,
+                        status='finalized',
+                    ).first()
+                attempt = SponsoredViewAttempt.objects.filter(
+                    payment=payment,
+                    status='graded',
+                    is_flagged=False,
+                    submitted_at__gte=settlement.period_start if settlement else timezone.now(),
+                    submitted_at__lt=settlement.period_end if settlement else timezone.now(),
+                ).first()
+                counted_in_settlement = bool(settlement and attempt and attempt.submitted_at)
+                try:
+                    with transaction.atomic():
+                        SponsoredViewSettlementAdjustment.objects.create(
+                            settlement=settlement,
+                            payment=payment,
+                            actor=request.user,
+                            refunded_amount_kes=payment.amount_kes,
+                            refund_reference=refund_reference,
+                            revenue_reversal_kes=payment.amount_kes if counted_in_settlement else 0,
+                            platform_share_reversal_kes=payment.amount_kes // 2 if counted_in_settlement else 0,
+                            rewards_share_reversal_kes=payment.amount_kes - payment.amount_kes // 2 if counted_in_settlement else 0,
+                            award_reversal_kes=award.amount_kes if award and award.status == 'awarded' else 0,
+                            payout_recovery_required=bool(claim and claim.status == 'paid'),
+                            reason=payment.rejection_reason,
+                        )
+                except IntegrityError as error:
+                    raise serializers.ValidationError({
+                        'refund_reference': 'This refund reference or payment refund is already recorded.',
+                    }) from error
+                if award and award.status == 'awarded':
+                    award.status = 'reversed'
+                    award.reversal_reason = payment.rejection_reason
+                    award.reversed_by = request.user
+                    award.reversed_at = timezone.now()
+                    award.save(update_fields=('status', 'reversal_reason', 'reversed_by', 'reversed_at'))
+                    if claim:
+                        claim.status = 'reversed'
+                        claim.rejection_reason = payment.rejection_reason
+                        claim.save(update_fields=('status', 'rejection_reason', 'updated_at'))
+            title = 'Sponsored View payment verified' if next_status == 'verified' else f'Sponsored View payment {next_status}'
             message = (
                 f'Your KSh 20 payment for {payment.assessment.title} is verified. '
                 'You can start the assessment during its Monday–Thursday EAT window.'
@@ -401,6 +489,11 @@ class StartSponsoredViewAttemptView(APIView):
             )
             assessment = payment.assessment
             now = timezone.now()
+            attempt = SponsoredViewAttempt.objects.select_for_update().filter(payment=payment).first()
+            if attempt:
+                if attempt.status == 'in_progress' and now >= attempt.deadline_at:
+                    _finalize_sponsored_view_timeout(attempt, now)
+                return Response(_attempt_response(attempt))
             window = activity_window('sponsored_view', now)
             if window is None:
                 return Response(
@@ -417,14 +510,6 @@ class StartSponsoredViewAttemptView(APIView):
                     {'error': 'This assessment is not available with a complete, published question set.'},
                     status=status.HTTP_409_CONFLICT,
                 )
-            attempt = SponsoredViewAttempt.objects.filter(payment=payment).first()
-            if attempt:
-                if attempt.status == 'in_progress' and now >= attempt.deadline_at:
-                    attempt.status = 'timed_out'
-                    attempt.submitted_at = now
-                    attempt.save(update_fields=('status', 'submitted_at'))
-                    return Response({'error': 'The assessment deadline has expired.'}, status=status.HTTP_410_GONE)
-                return Response(_attempt_response(attempt))
             questions = list(assessment.questions.order_by('order'))
             started_at = now
             attempt = SponsoredViewAttempt.objects.create(
@@ -447,7 +532,7 @@ class StartSponsoredViewAttemptView(APIView):
                 deadline_at=attempt_deadline(
                     'sponsored_view',
                     started_at,
-                    assessment.duration_minutes * 60,
+                    ASSESSMENT_DURATION_SECONDS,
                 ),
             )
         return Response(_attempt_response(attempt), status=status.HTTP_201_CREATED)
@@ -467,10 +552,8 @@ class SaveSponsoredViewAttemptAnswersView(APIView):
                 return Response({'error': 'This assessment attempt is no longer active.'}, status=status.HTTP_409_CONFLICT)
             now = timezone.now()
             if now >= attempt.deadline_at:
-                attempt.status = 'timed_out'
-                attempt.submitted_at = now
-                attempt.save(update_fields=('status', 'submitted_at'))
-                return Response({'error': 'The assessment deadline has expired.'}, status=status.HTTP_410_GONE)
+                _finalize_sponsored_view_timeout(attempt, now)
+                return Response(_attempt_response(attempt))
             answers = request.data.get('answers', {})
             reasoning = request.data.get('reasoning', {})
             if not isinstance(answers, dict) or not isinstance(reasoning, dict):
@@ -510,7 +593,7 @@ class SubmitSponsoredViewAttemptView(APIView):
                 id=attempt_id,
                 user=request.user,
             )
-            if attempt.status == 'graded':
+            if attempt.status in {'graded', 'timed_out'}:
                 from .support_views import sync_support_eligibilities_for_user
                 sync_support_eligibilities_for_user(attempt.user)
                 return Response(_attempt_response(attempt))
@@ -518,10 +601,8 @@ class SubmitSponsoredViewAttemptView(APIView):
                 return Response({'error': 'This assessment attempt is no longer active.'}, status=status.HTTP_409_CONFLICT)
             now = timezone.now()
             if now >= attempt.deadline_at:
-                attempt.status = 'timed_out'
-                attempt.submitted_at = now
-                attempt.save(update_fields=('status', 'submitted_at'))
-                return Response({'error': 'The assessment deadline has expired.'}, status=status.HTTP_410_GONE)
+                _finalize_sponsored_view_timeout(attempt, now)
+                return Response(_attempt_response(attempt))
             answers = request.data.get('answers', {})
             reasoning = request.data.get('reasoning', {})
             if not isinstance(answers, dict) or not isinstance(reasoning, dict):

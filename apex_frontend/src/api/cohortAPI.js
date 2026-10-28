@@ -6,6 +6,8 @@ export const getCohort = (id) => api.get(`/cohorts/${id}/`)
 export const enrollCohort = (id) => api.post(`/cohorts/${id}/enroll/`)
 export const getAssessments = (cohortId) => api.get(`/cohorts/${cohortId}/assessments/`)
 export const startAssessment = (assessmentId) => api.post(`/cohorts/assessments/${assessmentId}/start/`)
+export const saveAssessmentAttemptAnswers = (attemptId, answers) =>
+  api.post(`/cohorts/assessment-attempts/${attemptId}/answers/`, { answers })
 export const submitAssessment = (assessmentId, answers) =>
   api.post(`/cohorts/assessments/${assessmentId}/submit/`, { answers })
 export const getCohortLeaderboard = (cohortId) => api.get(`/cohorts/${cohortId}/leaderboard/`)

@@ -67,6 +67,7 @@ class SupportApplicationSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'program', 'program_title', 'program_type', 'full_name',
             'registered_phone_number', 'mpesa_number', 'merit_score_at_application',
+            'award_amount_kes_at_application',
             'application_fields_at_application', 'application_data',
             'tutorial_consistency_weeks_at_application', 'status', 'admin_reason',
             'payment_reference', 'payment_confirmed_at', 'submitted_at', 'updated_at',
@@ -117,7 +118,7 @@ class SupportApplicationInformationSerializer(serializers.Serializer):
 def get_support_merit(user):
     scores = AssessmentScheduleAttempt.objects.filter(
         user=user,
-        status='graded',
+        status__in=('graded', 'timed_out'),
         score__isnull=False,
         is_flagged=False,
     ).aggregate(average=Avg('score'), count=Count('id'))
@@ -163,7 +164,7 @@ def get_program_eligibility_metric(user, rule):
     if rule['source'] == 'sponsored_view_average':
         scores = SponsoredViewAttempt.objects.filter(
             user=user,
-            status='graded',
+            status__in=('graded', 'timed_out'),
             score__isnull=False,
             payment__status='verified',
         ).aggregate(average=Avg('score'), count=Count('id'))
@@ -282,6 +283,7 @@ def sync_support_eligibility(user, program, *, merit_score=None, completed_conte
             metadata={
                 'program_id': str(program.id),
                 'program_type': program.program_type,
+                'award_amount_kes': program.award_amount_kes,
                 'eligible': False,
             },
         )
@@ -320,8 +322,8 @@ def reconcile_support_program(program_id):
         return
 
     users = User.objects.filter(
-        Q(assessment_attempts__status='graded', assessment_attempts__score__isnull=False, assessment_attempts__is_flagged=False)
-        | Q(sponsored_view_attempts__status='graded', sponsored_view_attempts__score__isnull=False)
+        Q(assessment_attempts__status__in=('graded', 'timed_out'), assessment_attempts__score__isnull=False, assessment_attempts__is_flagged=False)
+        | Q(sponsored_view_attempts__status__in=('graded', 'timed_out'), sponsored_view_attempts__score__isnull=False)
         | Q(tutorial_progress__completed_at__isnull=False)
     ).distinct()
     for user in users.iterator():
@@ -523,6 +525,7 @@ class SupportApplicationCreateView(APIView):
                         program_type_at_application=program.program_type,
                         eligibility_rules_at_application=program.eligibility_rules,
                         merit_cutoff_at_application=eligibility.merit_cutoff_at_eligibility,
+                        award_amount_kes_at_application=program.award_amount_kes,
                         full_name=registered_name,
                         registered_phone_number=registered_phone,
                         mpesa_number=values['mpesa_number'],

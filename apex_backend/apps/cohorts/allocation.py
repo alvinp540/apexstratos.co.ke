@@ -47,7 +47,7 @@ def allocate_cohort_rewards(cohort_id):
         AssessmentAttempt.objects.filter(
             cohort=cohort,
             user_id__in=participant_ids,
-            status='graded',
+            status__in=('graded', 'timed_out'),
             score__isnull=False,
             is_flagged=False,
         ).values('user_id').annotate(score=Avg('score'), latest=Max('submitted_at')).order_by('-score', 'latest')
@@ -78,7 +78,7 @@ def allocate_cohort_rewards(cohort_id):
     thresholds = {'skills': 70, 'consistency': 70, 'improvement': 5}
     for role, row in selected:
         user = cohort.enrollments.get(user_id=row['user_id']).user
-        attempts = list(AssessmentAttempt.objects.filter(cohort=cohort, user=user, status='graded', score__isnull=False).order_by('submitted_at').values_list('score', flat=True))
+        attempts = list(AssessmentAttempt.objects.filter(cohort=cohort, user=user, status__in=('graded', 'timed_out'), score__isnull=False).order_by('submitted_at').values_list('score', flat=True))
         baseline = float(attempts[0]) if attempts else 0
         latest = float(attempts[-1]) if attempts else float(row['score'])
         consistency = (min(attempts) / max(attempts) * 100) if attempts and max(attempts) else 0

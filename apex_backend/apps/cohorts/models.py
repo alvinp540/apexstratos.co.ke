@@ -238,6 +238,7 @@ class TutorialAttempt(models.Model):
     score = models.FloatField(null=True, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='in_progress', db_index=True)
     started_at = models.DateTimeField(auto_now_add=True)
+    deadline_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -294,7 +295,8 @@ class CohortEnrollment(models.Model):
 
 class AssessmentAttempt(models.Model):
     STATUS_CHOICES = [
-        ('in_progress', 'In Progress'), ('submitted', 'Submitted'), ('graded', 'Graded')
+        ('in_progress', 'In Progress'), ('submitted', 'Submitted'), ('graded', 'Graded'),
+        ('timed_out', 'Timed Out'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -308,6 +310,7 @@ class AssessmentAttempt(models.Model):
     score = models.FloatField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_progress')
     started_at = models.DateTimeField(auto_now_add=True)
+    deadline_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
 
     tab_switches = models.PositiveIntegerField(default=0)
@@ -603,6 +606,16 @@ class SponsoredViewAssessment(models.Model):
         choices=[('foundation', 'Foundation'), ('developing', 'Developing'), ('integrated', 'Integrated')],
         default='foundation',
     )
+    reward_minimum_score = models.FloatField(
+        default=70,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text='Minimum verified score for any daily reward consideration.',
+    )
+    reward_primary_score = models.FloatField(
+        default=90,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text='Score required for primary ranking; eligible runners-up may receive redistributed awards.',
+    )
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft', db_index=True)
     expert_reviewed = models.BooleanField(default=False)
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_sponsored_assessments')
@@ -617,6 +630,13 @@ class SponsoredViewAssessment(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['field', 'week', 'slot'], name='unique_sponsored_view_slot'),
         ]
+
+    def clean(self):
+        super().clean()
+        if self.reward_primary_score < self.reward_minimum_score:
+            raise ValidationError({
+                'reward_primary_score': 'The primary score threshold must be at least the minimum reward score.',
+            })
 
     def __str__(self):
         return f'Week {self.week} / {self.field} #{self.slot}: {self.title}'
@@ -645,6 +665,8 @@ class SponsoredViewPayment(models.Model):
         ('pending', 'Pending verification'),
         ('verified', 'Verified'),
         ('rejected', 'Rejected'),
+        ('cancelled', 'Cancelled'),
+        ('refunded', 'Refunded'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -697,6 +719,8 @@ class SponsoredViewAttempt(models.Model):
     deadline_at = models.DateTimeField()
     submitted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    is_flagged = models.BooleanField(default=False, db_index=True)
+    flag_reason = models.TextField(blank=True)
 
     class Meta:
         db_table = 'sponsored_view_attempts'
@@ -704,6 +728,11 @@ class SponsoredViewAttempt(models.Model):
             models.Index(fields=['user', 'started_at']),
             models.Index(fields=['user', 'status']),
         ]
+
+    def clean(self):
+        super().clean()
+        if self.is_flagged and not self.flag_reason.strip():
+            raise ValidationError({'flag_reason': 'Explain why this attempt is flagged.'})
 
 
 class ParticipationPayment(models.Model):
@@ -809,7 +838,7 @@ class AssessmentScheduleAttempt(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     deadline_at = models.DateTimeField(null=True, blank=True)
-    duration_seconds = models.PositiveIntegerField(default=1200)
+    duration_seconds = models.PositiveIntegerField(default=300)
 
     tab_switches = models.PositiveIntegerField(default=0)
     time_anomalies = models.PositiveIntegerField(default=0)
@@ -874,6 +903,11 @@ class SupportProgram(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text='Cutoff applied to the average of completed, unflagged Main Contest assessment scores.',
     )
+    award_amount_kes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Monthly merit sponsorship amount. Supported awards are KES 20,000 and KES 90,000.',
+    )
     funding_status = models.CharField(max_length=24, choices=FUNDING_CHOICES, default='awaiting_funding')
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft', db_index=True)
     deadline = models.DateTimeField(null=True, blank=True)
@@ -906,6 +940,15 @@ class SupportProgram(models.Model):
 
     def clean(self):
         super().clean()
+        if self.status == 'published' and self.program_type == 'cash_award' and self.award_amount_kes is None:
+            raise ValidationError({'award_amount_kes': 'Set the monthly award amount before publishing this cash sponsorship.'})
+        if self.award_amount_kes is not None and (
+            self.program_type != 'cash_award'
+            or self.award_amount_kes not in {20000, 90000}
+        ):
+            raise ValidationError({
+                'award_amount_kes': 'Monthly cash awards must be KES 20,000 or KES 90,000.',
+            })
         if self.eligibility_config:
             config = self.eligibility_config
             if not isinstance(config, dict) or set(config) - {
@@ -1062,6 +1105,7 @@ class SupportApplication(models.Model):
     program_type_at_application = models.CharField(max_length=32, choices=SupportProgram.TYPE_CHOICES)
     eligibility_rules_at_application = models.TextField()
     merit_cutoff_at_application = models.FloatField()
+    award_amount_kes_at_application = models.PositiveIntegerField(null=True, blank=True)
     full_name = models.CharField(max_length=200)
     registered_phone_number = models.CharField(max_length=20)
     mpesa_number = models.CharField(max_length=20)
@@ -1118,3 +1162,150 @@ class SupportApplicationEvent(models.Model):
     class Meta:
         db_table = 'support_application_events'
         ordering = ['created_at']
+
+
+class SponsoredViewDailySettlement(models.Model):
+    STATUS_CHOICES = [('finalized', 'Finalized'), ('failed', 'Failed')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    assessment = models.ForeignKey(
+        SponsoredViewAssessment, on_delete=models.PROTECT, related_name='daily_settlements'
+    )
+    capability = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
+    settlement_date = models.DateField()
+    timezone_name = models.CharField(max_length=64, default='Africa/Nairobi')
+    period_start = models.DateTimeField()
+    period_end = models.DateTimeField()
+    participation_fee_kes = models.PositiveSmallIntegerField(default=20)
+    eligible_participant_count = models.PositiveIntegerField(default=0)
+    total_revenue_kes = models.PositiveIntegerField(default=0)
+    platform_share_kes = models.PositiveIntegerField(default=0)
+    rewards_budget_kes = models.PositiveIntegerField(default=0)
+    primary_winner_count = models.PositiveIntegerField(default=0)
+    secondary_winner_count = models.PositiveIntegerField(default=0)
+    awarded_total_kes = models.PositiveIntegerField(default=0)
+    unallocated_reserve_kes = models.PositiveIntegerField(default=0)
+    criteria_snapshot = models.JSONField(default=dict)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='finalized', db_index=True)
+    attempt_count = models.PositiveIntegerField(default=1)
+    error_message = models.TextField(blank=True)
+    idempotency_key = models.CharField(max_length=160, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finalized_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'sponsored_view_daily_settlements'
+        constraints = [models.UniqueConstraint(
+            fields=['assessment', 'settlement_date'], name='unique_sponsored_daily_settlement'
+        )]
+        indexes = [models.Index(fields=['settlement_date', 'capability'])]
+
+
+class SponsoredViewRewardAward(models.Model):
+    SELECTION_CHOICES = [('primary', 'Primary'), ('secondary', 'Secondary')]
+    STATUS_CHOICES = [('awarded', 'Awarded'), ('reversed', 'Reversed')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    settlement = models.ForeignKey(
+        SponsoredViewDailySettlement, on_delete=models.PROTECT, related_name='awards'
+    )
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='sponsored_view_rewards')
+    payment = models.OneToOneField(
+        SponsoredViewPayment, on_delete=models.PROTECT, related_name='reward_award'
+    )
+    amount_kes = models.PositiveSmallIntegerField(default=100)
+    score = models.FloatField()
+    rank = models.PositiveIntegerField()
+    selection = models.CharField(max_length=12, choices=SELECTION_CHOICES)
+    eligibility_snapshot = models.JSONField(default=dict)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='awarded', db_index=True)
+    reversal_reason = models.TextField(blank=True)
+    reversed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='reversed_sponsored_rewards'
+    )
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sponsored_view_reward_awards'
+        constraints = [models.UniqueConstraint(
+            fields=['settlement', 'user'], name='unique_student_daily_reward'
+        )]
+        indexes = [models.Index(fields=['user', 'status', 'created_at'])]
+
+
+class SponsoredViewRewardClaim(models.Model):
+    STATUS_CHOICES = [
+        ('claim_required', 'Claim required'), ('claim_submitted', 'Claim submitted'),
+        ('verified', 'Verified'), ('payout_pending', 'Payout pending'),
+        ('paid', 'Paid'), ('rejected', 'Rejected'), ('reversed', 'Reversed'),
+    ]
+    METHOD_CHOICES = [('mpesa', 'M-Pesa')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    award = models.OneToOneField(
+        SponsoredViewRewardAward, on_delete=models.PROTECT, related_name='claim'
+    )
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='reward_claims')
+    payment_method = models.CharField(max_length=16, choices=METHOD_CHOICES, default='mpesa')
+    # The payout destination is the student's already-registered phone; no new sensitive
+    # payment credentials are collected or copied into the rewards database.
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='claim_required', db_index=True)
+    consented_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    verified_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='verified_reward_claims'
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    merit_confirmed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='merit_confirmed_reward_claims'
+    )
+    merit_confirmed_at = models.DateTimeField(null=True, blank=True)
+    payout_reference = models.CharField(max_length=255, blank=True)
+    payout_reconciliation_note = models.TextField(blank=True)
+    payout_confirmed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='confirmed_reward_payouts'
+    )
+    payout_confirmed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sponsored_view_reward_claims'
+        constraints = [models.UniqueConstraint(
+            fields=['payout_reference'], condition=~models.Q(payout_reference=''),
+            name='unique_reward_payout_reference',
+        )]
+        indexes = [models.Index(fields=['status', 'created_at'])]
+
+
+class SponsoredViewSettlementAdjustment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    settlement = models.ForeignKey(
+        SponsoredViewDailySettlement, null=True, blank=True,
+        on_delete=models.PROTECT, related_name='adjustments',
+    )
+    payment = models.OneToOneField(
+        SponsoredViewPayment, on_delete=models.PROTECT, related_name='settlement_adjustment'
+    )
+    actor = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='sponsored_settlement_adjustments'
+    )
+    refunded_amount_kes = models.PositiveSmallIntegerField(default=20)
+    refund_reference = models.CharField(max_length=255, blank=True)
+    revenue_reversal_kes = models.PositiveSmallIntegerField(default=0)
+    platform_share_reversal_kes = models.PositiveSmallIntegerField(default=0)
+    rewards_share_reversal_kes = models.PositiveSmallIntegerField(default=0)
+    award_reversal_kes = models.PositiveSmallIntegerField(default=0)
+    payout_recovery_required = models.BooleanField(default=False)
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sponsored_view_settlement_adjustments'
+        indexes = [models.Index(fields=['settlement', 'created_at'])]
+        constraints = [models.UniqueConstraint(
+            fields=['refund_reference'], condition=~models.Q(refund_reference=''),
+            name='unique_sponsored_refund_reference',
+        )]

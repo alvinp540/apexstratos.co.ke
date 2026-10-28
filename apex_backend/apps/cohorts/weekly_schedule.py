@@ -5,6 +5,7 @@ from django.utils import timezone
 
 
 EAT = ZoneInfo('Africa/Nairobi')
+ASSESSMENT_DURATION_SECONDS = 300
 ACTIVITY_WEEKDAYS = {
     'tutorials': frozenset((0, 1, 2, 3)),
     'sponsored_view': frozenset((0, 1, 2, 3)),
@@ -44,11 +45,11 @@ def next_opening(activity, value=None):
     return timezone.make_aware(datetime.combine(opening_date, time.min), EAT)
 
 
-def attempt_deadline(activity, started_at, duration_seconds=20 * 60):
+def attempt_deadline(activity, started_at, duration_seconds=ASSESSMENT_DURATION_SECONDS):
     window = activity_window(activity, started_at)
     if window is None:
         raise ValueError('An attempt cannot start outside its activity window.')
-    return min(started_at + timedelta(seconds=duration_seconds), window[1])
+    return started_at + timedelta(seconds=duration_seconds)
 
 
 def activity_status(activity, value=None):

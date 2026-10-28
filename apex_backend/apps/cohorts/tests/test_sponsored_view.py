@@ -66,7 +66,7 @@ class SponsoredViewAccessTests(TestCase):
                 rationale='A contract test checks observed data against the agreed interface.',
             )
 
-    def create_payment(self, reference='SPONSOREDREF1', now=None):
+    def create_payment(self, reference='SPONSOREDREF1', now=None, assessment_id=None):
         with patch(
             'apps.cohorts.sponsored_views.timezone.now',
             return_value=now or eat_datetime(2026, 10, 12, 10),
@@ -74,7 +74,7 @@ class SponsoredViewAccessTests(TestCase):
             return self.client.post(
                 reverse(
                     'sponsored-view-payment-create',
-                    kwargs={'assessment_id': self.assessment.id},
+                    kwargs={'assessment_id': assessment_id or self.assessment.id},
                 ),
                 {'payment_reference': reference},
                 format='json',
@@ -156,7 +156,7 @@ class SponsoredViewAccessTests(TestCase):
                 format='json',
             )
         self.assertEqual(started.status_code, 201)
-        self.assertEqual(started.data['deadline_at'], monday + timedelta(minutes=21))
+        self.assertEqual(started.data['deadline_at'], monday + timedelta(minutes=6))
         self.assertNotIn('correct_answer', started.data['questions'][0])
         question_id = started.data['questions'][0]['id']
         with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday + timedelta(minutes=2)):
@@ -191,6 +191,42 @@ class SponsoredViewAccessTests(TestCase):
         self.assertIn('correct_answer', submitted.data['questions'][0])
         self.assertEqual(SponsoredViewAttempt.objects.count(), 1)
 
+    def test_timeout_grades_only_saved_answers_and_repeated_finalize_is_idempotent(self):
+        monday = eat_datetime(2026, 10, 12, 10)
+        payment = self.create_payment('SPONSORED_TIMEOUT', now=monday)
+        self.client.force_authenticate(self.admin)
+        verified = self.client.post(
+            reverse('sponsored-view-payment-admin-decision', kwargs={'payment_id': payment.data['id']}),
+            {'status': 'verified', 'mpesa_transaction_id': 'SPONSORED-TIMEOUT-TXN'},
+            format='json',
+        )
+        self.assertEqual(verified.status_code, 200)
+        self.client.force_authenticate(self.student)
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday):
+            started = self.client.post(
+                reverse('sponsored-view-attempt-start', kwargs={'payment_id': payment.data['id']}),
+                {}, format='json',
+            )
+        self.assertEqual(started.data['deadline_at'], monday + timedelta(seconds=300))
+        first = started.data['questions'][0]
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday + timedelta(minutes=4, seconds=55)):
+            saved = self.client.post(
+                reverse('sponsored-view-attempt-answers', kwargs={'attempt_id': started.data['id']}),
+                {'answers': {first['id']: first['options'][0]}, 'reasoning': {}}, format='json',
+            )
+        self.assertEqual(saved.status_code, 200)
+        late_answers = {question['id']: question['options'][0] for question in started.data['questions']}
+        submit_url = reverse('sponsored-view-attempt-submit', kwargs={'attempt_id': started.data['id']})
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday + timedelta(seconds=300)):
+            finalized = self.client.post(submit_url, {'answers': late_answers}, format='json')
+            repeated = self.client.post(submit_url, {'answers': late_answers}, format='json')
+        self.assertEqual(finalized.data['status'], 'timed_out')
+        self.assertEqual(finalized.data['score'], 10)
+        self.assertEqual(repeated.data['score'], 10)
+        attempt = SponsoredViewAttempt.objects.get()
+        self.assertEqual(attempt.status, 'timed_out')
+        self.assertEqual(len(attempt.answers), 1)
+
     def test_only_weekday_window_allows_payment_requests_and_starts(self):
         friday = eat_datetime(2026, 10, 16)
         closed = self.create_payment('SPONSOREDREF2', now=friday)
@@ -203,15 +239,43 @@ class SponsoredViewAccessTests(TestCase):
         )
         self.assertEqual(invalid_list_post.status_code, 405)
 
-    def test_daily_limit_and_duplicate_payment_or_transaction_references_are_enforced(self):
+    def test_capability_limit_and_duplicate_payment_or_transaction_references_are_enforced(self):
         monday = eat_datetime(2026, 10, 12, 10)
+        assessments = [self.assessment]
+        for slot in range(2, 7):
+            assessment = SponsoredViewAssessment.objects.create(
+                week=1, slot=slot, field='Software Development', title=f'Capability assessment {slot}',
+                description='A capability-limit assessment.',
+                learning_objectives=['A', 'B', 'C'], status='published',
+            )
+            for order in range(1, 11):
+                SponsoredViewQuestion.objects.create(
+                    assessment=assessment, order=order, prompt=f'Question {order}',
+                    options=['A', 'B', 'C', 'D'], correct_answer='A', rationale='Test rationale',
+                )
+            assessments.append(assessment)
         responses = [
-            self.create_payment(f'SPONSOREDREF{index}', now=monday)
-            for index in range(1, 6)
+            self.create_payment(f'SPONSOREDREF{index}', now=monday, assessment_id=assessment.id)
+            for index, assessment in enumerate(assessments[:5], start=1)
         ]
-        sixth = self.create_payment('SPONSOREDREF6', now=monday)
-        self.assertTrue(all(response.status_code == 201 for response in responses))
-        self.assertEqual(sixth.status_code, 429)
+        sixth = self.create_payment('SPONSOREDREF6', now=monday, assessment_id=assessments[5].id)
+        self.assertTrue(all(response.status_code == 201 for response in responses), [(response.status_code, response.data) for response in responses])
+        self.assertEqual(sixth.status_code, 409)
+        self.assertIn('maximum of five active entries', sixth.data['error'])
+        other_capability = SponsoredViewAssessment.objects.create(
+            week=1, slot=9, field='Finance', title='Independent capability entry',
+            description='A second capability remains available.',
+            learning_objectives=['A', 'B', 'C'], status='published',
+        )
+        for order in range(1, 11):
+            SponsoredViewQuestion.objects.create(
+                assessment=other_capability, order=order, prompt=f'Finance question {order}',
+                options=['A', 'B', 'C', 'D'], correct_answer='A', rationale='Test rationale',
+            )
+        other = self.create_payment(
+            'OTHER-CAPABILITY-ENTRY', now=monday, assessment_id=other_capability.id,
+        )
+        self.assertEqual(other.status_code, 201)
 
         payment = SponsoredViewPayment.objects.first()
         self.client.force_authenticate(self.admin)
@@ -235,7 +299,7 @@ class SponsoredViewAccessTests(TestCase):
         payment.refresh_from_db()
         self.assertEqual(payment.status, 'pending')
 
-    def test_thursday_start_deadline_is_capped_at_friday_eat(self):
+    def test_thursday_attempt_keeps_its_full_five_minutes_across_activity_boundary(self):
         payment_response = self.create_payment('SPONSOREDREF7', now=eat_datetime(2026, 10, 15, 23, 40))
         payment = SponsoredViewPayment.objects.get(id=payment_response.data['id'])
         payment.status = 'verified'
@@ -243,7 +307,7 @@ class SponsoredViewAccessTests(TestCase):
         payment.save(update_fields=('status', 'verified_at'))
         with patch(
             'apps.cohorts.sponsored_views.timezone.now',
-            return_value=eat_datetime(2026, 10, 15, 23, 50),
+            return_value=eat_datetime(2026, 10, 15, 23, 57),
         ):
             started = self.client.post(
                 reverse('sponsored-view-attempt-start', kwargs={'payment_id': payment.id}),
@@ -251,4 +315,4 @@ class SponsoredViewAccessTests(TestCase):
                 format='json',
             )
         self.assertEqual(started.status_code, 201)
-        self.assertEqual(started.data['deadline_at'], eat_datetime(2026, 10, 16))
+        self.assertEqual(started.data['deadline_at'], eat_datetime(2026, 10, 16, 0, 2))

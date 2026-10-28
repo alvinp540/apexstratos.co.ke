@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import api, { getErrorMessage, unwrapList } from '../api/client'
 import { studyAreas } from '../data'
@@ -123,6 +123,7 @@ function TutorialAssessment({ tutorial, onComplete }) {
   const [remaining, setRemaining] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const timeoutRequest = useRef(false)
 
   useEffect(() => {
     if (tutorial.current_attempt?.id && tutorial.current_attempt.id !== attempt?.id) {
@@ -186,13 +187,41 @@ function TutorialAssessment({ tutorial, onComplete }) {
     }
   }
 
+  useEffect(() => {
+    if (!attempt?.id || attempt.status !== 'in_progress' || remaining !== 0 || timeoutRequest.current) return undefined
+    let cancelled = false
+    let retryTimer
+    timeoutRequest.current = true
+    const finalize = async () => {
+      try {
+        const { data } = await api.post(`/cohorts/tutorial-attempts/${attempt.id}/submit/`, {})
+        if (!cancelled) {
+          setAttempt(data)
+          setAnswers(data.answers || {})
+          setReasoning(data.reasoning || {})
+          onComplete()
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          setError(`Time is up. Finalizing saved answers… ${getErrorMessage(requestError)}`)
+          retryTimer = window.setTimeout(finalize, 2000)
+        }
+      }
+    }
+    finalize()
+    return () => { cancelled = true; window.clearTimeout(retryTimer); timeoutRequest.current = false }
+  }, [attempt?.id, attempt?.status, remaining, onComplete])
+
   if (!attempt) return <section className="lesson-section"><div className="eyebrow">ASSESSMENT</div><h2>Check your understanding</h2><p>Complete the ten-question assessment to save your progress. One attempt is allowed; refresh or reconnect to resume an active attempt.</p><button className="button button-primary" onClick={start} disabled={busy || !tutorial.can_start}>{busy ? 'Opening assessment…' : tutorial.can_start ? 'Start assessment' : 'Opens Monday–Thursday'}</button>{error && <p role="alert">{error}</p>}</section>
   const complete = attempt.questions.length === 10 && attempt.questions.every((question) =>
     answers[question.id] && (!question.requires_reasoning || reasoning[question.id]?.trim()),
   )
   return <section className="lesson-section"><div className="eyebrow">ASSESSMENT · {attempt.status === 'graded' ? `SCORE ${attempt.score}%` : attempt.status === 'timed_out' ? 'TIME EXPIRED' : '10 QUESTIONS'}</div><h2>{attempt.status === 'graded' ? 'Assessment results' : attempt.status === 'timed_out' ? 'Attempt expired' : 'Choose the best answer'}</h2>
-    {attempt.status === 'in_progress' && <p role="timer">Time remaining: {remaining === null ? '—' : `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`} · deadline is enforced by the server.</p>}
-    {attempt.questions.map((question) => <fieldset className="tutorial-question" key={question.id}><legend>{question.order}. {question.prompt}</legend>{question.options.map((option) => <label key={option}><input type="radio" name={question.id} value={option} checked={answers[question.id] === option} disabled={attempt.status === 'graded'} onChange={() => setAnswers((current) => ({ ...current, [question.id]: option }))} />{option}</label>)}{question.requires_reasoning && <label className="written-reasoning">Written reasoning<textarea value={reasoning[question.id] || ''} onChange={(event) => setReasoning((current) => ({ ...current, [question.id]: event.target.value }))} disabled={attempt.status === 'graded'} required maxLength={5000} /></label>}{question.rationale && <p>{question.rationale}</p>}{question.written_reasoning && <p>Your reasoning: {question.written_reasoning}</p>}</fieldset>)}
+    {attempt.status === 'in_progress' && <p role="timer" aria-live="off">Time remaining: {remaining === null ? '—' : `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`} · deadline is enforced by the server.</p>}
+    {attempt.status === 'in_progress' && remaining <= 60 && remaining > 30 && <p role="status">One minute remaining.</p>}
+    {attempt.status === 'in_progress' && remaining <= 30 && remaining > 0 && <p role="alert">30 seconds remaining.</p>}
+    {attempt.status === 'timed_out' && <p role="status">Time expired. Your saved answers were finalized and graded.</p>}
+    {attempt.questions.map((question) => <fieldset className="tutorial-question" key={question.id}><legend>{question.order}. {question.prompt}</legend>{question.options.map((option) => <label key={option}><input type="radio" name={question.id} value={option} checked={answers[question.id] === option} disabled={attempt.status !== 'in_progress' || remaining === 0} onChange={() => setAnswers((current) => ({ ...current, [question.id]: option }))} />{option}</label>)}{question.requires_reasoning && <label className="written-reasoning">Written reasoning<textarea value={reasoning[question.id] || ''} onChange={(event) => setReasoning((current) => ({ ...current, [question.id]: event.target.value }))} disabled={attempt.status !== 'in_progress' || remaining === 0} required maxLength={5000} /></label>}{question.rationale && <p>{question.rationale}</p>}{question.written_reasoning && <p>Your reasoning: {question.written_reasoning}</p>}</fieldset>)}
     {attempt.status === 'in_progress' && <button className="button button-primary" onClick={submit} disabled={busy || !complete || remaining === 0}>{busy ? 'Submitting…' : 'Submit answers'}</button>}
     {error && <p role="alert">{error}</p>}
   </section>
@@ -327,9 +356,9 @@ export function Opportunities() {
         return <article className="support-programme-card" key={program.id}>
           <div className="tutorial-card-top"><span className="tag">{program.program_type.replaceAll('_', ' ')}</span><span className={`contest-status status-${application?.status || (program.eligible ? 'eligible' : 'pending')}`}>{application?.status?.replaceAll('_', ' ') || (program.eligible ? 'Eligible to apply' : 'Not yet eligible')}</span></div>
           <h3>{program.title}</h3><p>{program.description}</p>
-          <div className="support-programme-facts"><span>Published criterion: {program.metric_label ? `${program.metric_label} ≥ ${program.merit_cutoff}` : 'Eligibility rules need administrator configuration'}</span><span>{program.metric_label || 'Verified result'}: {program.merit_score} ({program.completed_requirements} qualifying records)</span><span>Tutorial consistency: {program.tutorial_consistency_weeks} of 8 weeks</span><span>Funding: {program.funding_status.replaceAll('_', ' ')}</span>{program.deadline && <span>Deadline: {new Date(program.deadline).toLocaleString()}</span>}</div>
+          <div className="support-programme-facts">{program.award_amount_kes && <span>Monthly sponsorship: KES {Number(program.award_amount_kes).toLocaleString()}</span>}<span>Published criterion: {program.metric_label ? `${program.metric_label} ≥ ${program.merit_cutoff}` : 'Eligibility rules need administrator configuration'}</span><span>{program.metric_label || 'Verified result'}: {program.merit_score} ({program.completed_requirements} qualifying records)</span><span>Tutorial consistency: {program.tutorial_consistency_weeks} of 8 weeks</span><span>Funding: {program.funding_status.replaceAll('_', ' ')}</span>{program.deadline && <span>Deadline: {new Date(program.deadline).toLocaleString()}</span>}</div>
           <p className="support-eligibility-rules"><strong>Eligibility rules:</strong> {program.eligibility_rules}</p>
-          {application ? <div className="support-application-status"><strong>Application status: {application.status.replaceAll('_', ' ')}</strong>{application.admin_reason && <p>{application.admin_reason}</p>}{application.payment_reference && <p>Payment reference: {application.payment_reference}</p>}{application.payment_confirmed_at && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}</div> : program.eligible && program.funding_status !== 'closed' ? <form className="support-application-form" onSubmit={(event) => submitApplication(event, program)}>
+          {application ? <div className="support-application-status"><strong>Application status: {application.status.replaceAll('_', ' ')}</strong>{application.award_amount_kes_at_application && <p>Requested monthly sponsorship: KES {Number(application.award_amount_kes_at_application).toLocaleString()}</p>}{application.admin_reason && <p>{application.admin_reason}</p>}{application.payment_reference && <p>Payment reference: {application.payment_reference}</p>}{application.payment_confirmed_at && <p>Payment confirmed: {new Date(application.payment_confirmed_at).toLocaleString()}</p>}</div> : program.eligible && program.funding_status !== 'closed' ? <form className="support-application-form" onSubmit={(event) => submitApplication(event, program)}>
             <h4>Application and payment details</h4><p>Submitting an application requests review; it does not guarantee selection, funding, or payment.</p>
             <label>Registered full name<input required maxLength={200} autoComplete="name" value={form.full_name ?? user?.full_name ?? ''} onChange={(event) => updateForm(program.id, 'full_name', event.target.value)} /></label>
             <label>Registered phone number<input required maxLength={20} autoComplete="tel" value={form.registered_phone_number ?? user?.phone_number ?? ''} onChange={(event) => updateForm(program.id, 'registered_phone_number', event.target.value)} /></label>
@@ -407,6 +436,7 @@ export function SponsoredView() {
   const [error, setError] = useState('')
   const [adminError, setAdminError] = useState('')
   const [status, setStatus] = useState({ loading: true, error: '' })
+  const timeoutRequest = useRef(false)
   const isAdmin = user?.role === 'admin' || user?.is_admin
 
   const load = useCallback(async () => {
@@ -418,7 +448,14 @@ export function SponsoredView() {
         api.get('/cohorts/sponsored-view/payments/'),
       ])
       setAssessments(data.results || [])
-      setPayments(unwrapList(paymentResponse.data))
+      const paymentRows = unwrapList(paymentResponse.data)
+      setPayments(paymentRows)
+      const resumableAttempt = paymentRows.find((row) => row.attempt?.status === 'in_progress')?.attempt
+      if (resumableAttempt) {
+        setAttempt(resumableAttempt)
+        setAnswers(resumableAttempt.answers || {})
+        setReasoning(resumableAttempt.reasoning || {})
+      }
       if (isAdmin) {
         try {
           const { data: adminData } = await api.get('/cohorts/admin/sponsored-view/payments/')
@@ -509,6 +546,31 @@ export function SponsoredView() {
     }
   }
 
+  useEffect(() => {
+    if (!attempt?.id || attempt.status !== 'in_progress' || remaining !== 0 || timeoutRequest.current) return undefined
+    let cancelled = false
+    let retryTimer
+    timeoutRequest.current = true
+    const finalize = async () => {
+      try {
+        const { data } = await api.post(`/cohorts/sponsored-view/attempts/${attempt.id}/submit/`, {})
+        if (!cancelled) {
+          setAttempt(data)
+          setAnswers(data.answers || {})
+          setReasoning(data.reasoning || {})
+          await load()
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          setError(`Time is up. Finalizing saved answers… ${getErrorMessage(requestError)}`)
+          retryTimer = window.setTimeout(finalize, 2000)
+        }
+      }
+    }
+    finalize()
+    return () => { cancelled = true; window.clearTimeout(retryTimer); timeoutRequest.current = false }
+  }, [attempt?.id, attempt?.status, remaining, load])
+
   const reviewPayment = async (payment, decision) => {
     const transactionId = (transactionIds[payment.id] || '').trim()
     const rejectionReason = (rejectionReasons[payment.id] || '').trim()
@@ -520,6 +582,10 @@ export function SponsoredView() {
       setError('Provide a reason when rejecting a payment.')
       return
     }
+    if (decision === 'refunded' && (!transactionId || !rejectionReason)) {
+      setError('Enter the confirmed M-Pesa refund reference and reason before recording a refund.')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -527,6 +593,7 @@ export function SponsoredView() {
         status: decision,
         mpesa_transaction_id: transactionId,
         rejection_reason: rejectionReason,
+        refund_reference: decision === 'refunded' ? transactionId : '',
       })
       await load()
     } catch (requestError) {
@@ -542,7 +609,7 @@ export function SponsoredView() {
 
   return <Page eyebrow="SPONSORED VIEW" title="Sponsored View Library" description="KSh 20 per attempt. Results and any reward remain subject to published rules, validation, funding, and approval.">
     <WeeklyScheduleNotice activity="sponsored_view" />
-    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Maximum five paid attempts per student per day, Monday–Thursday · 10 questions per assessment · target 800 assessments / 8,000 questions</span></div>
+    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Maximum five active entries per capability. Completed or expired attempts free a place; other capabilities remain available. Sponsored View runs Monday–Thursday.</span></div>
     <div className="filter-row"><label>Study area<select name="field" value={filters.field} onChange={(event) => setFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={filters.week} onChange={(event) => setFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={filters.topic} onChange={(event) => setFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {status.loading ? <Loading label="Finding published Sponsored View assessments…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : assessments.length === 0 ? <Empty title="No complete, published Sponsored View assessments match these filters">No approved assessment content is currently available for this selection. The published content count is zero; no placeholder assessments are shown.</Empty> : <div className="content-grid">{assessments.map((assessment) => {
@@ -554,7 +621,8 @@ export function SponsoredView() {
         || pendingPayment
         || assessmentPayments[0]
       const locked = !assessment.has_verified_access
-      const canRequestAnother = !pendingPayment && (
+      const capabilityAtLimit = assessment.active_entries_for_capability >= assessment.active_entry_limit
+      const canRequestAnother = !capabilityAtLimit && !pendingPayment && (
         !payment
         || payment.status === 'rejected'
         || ['graded', 'timed_out'].includes(payment.attempt?.status)
@@ -567,13 +635,15 @@ export function SponsoredView() {
         {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 20 payment is verified. Submit the payment reference below to request access.</p>}
         <p>{assessment.window_closes_at ? `Available now · closes ${new Date(assessment.window_closes_at).toLocaleString()}` : `Next opening: ${assessment.next_opening_at ? new Date(assessment.next_opening_at).toLocaleString() : 'not scheduled'}`}</p>
         <div className="tutorial-meta"><span>{assessment.question_count} questions</span><span>KSh {assessment.access_price_kes} per attempt</span></div>
+        <p className="contest-status">{assessment.field} active entries: {assessment.active_entries_for_capability}/{assessment.active_entry_limit}</p>
         {payment && <p className={`contest-status status-${payment.status}`}>Payment: {payment.status.replaceAll('_', ' ')}{payment.rejection_reason ? ` — ${payment.rejection_reason}` : ''}</p>}
         {assessmentPayments.filter((item) => item.id !== payment?.id).map((otherPayment) => <p key={otherPayment.id}>Another attempt: payment {otherPayment.status.replaceAll('_', ' ')}{otherPayment.attempt?.score != null ? ` · score ${otherPayment.attempt.score}%` : ''}</p>)}
         {payment?.attempt && <p>Attempt: {payment.attempt.status.replaceAll('_', ' ')}{payment.attempt.score != null ? ` · Score ${payment.attempt.score}%` : ''}</p>}
-        {payment?.status === 'verified' && <button className="button button-primary" disabled={busy || !assessment.can_start} onClick={() => beginAttempt(payment.id)}>{assessment.can_start ? payment.attempt?.status === 'in_progress' ? 'Resume assessment' : payment.attempt ? 'View result' : 'Start assessment' : 'Available Monday–Thursday'}</button>}
+        {payment?.status === 'verified' && <button className="button button-primary" disabled={busy || (!assessment.can_start && payment.attempt?.status !== 'in_progress')} onClick={() => beginAttempt(payment.id)}>{assessment.can_start ? payment.attempt?.status === 'in_progress' ? 'Resume assessment' : payment.attempt ? 'View result' : 'Start assessment' : payment.attempt?.status === 'in_progress' ? 'Resume / finalize attempt' : 'Available Monday–Thursday'}</button>}
         {pendingPayment && <p role="status">Payment is awaiting administrator verification. Your library access will appear here as soon as it is verified.</p>}
+        {capabilityAtLimit && !pendingPayment && <p className="assessment-lock-notice" role="status">You have reached the maximum of five active entries for {assessment.field}. You can continue participating in other capabilities.</p>}
         {canRequestAnother && <form className="form-stack" onSubmit={(event) => { event.preventDefault(); requestPayment(assessment) }}>
-              <p>Pay KSh 20 to Till 1598106, then submit the M-Pesa payment reference. Access begins immediately after an administrator verifies payment.</p>
+              <p>Pay KSh 20 to the company M-Pesa Till 1598106, then submit the transaction reference. An admin checks the incoming Till payment and confirms it before access is granted.</p>
               <label>M-Pesa payment reference<input required maxLength={255} autoComplete="off" value={paymentReferences[assessment.id] || ''} onChange={(event) => setPaymentReferences((current) => ({ ...current, [assessment.id]: event.target.value }))} /></label>
               <button className="button button-primary" type="submit" disabled={busy || !assessment.window_closes_at}>{assessment.window_closes_at ? 'Submit payment for verification' : 'Payment access Monday–Thursday'}</button>
             </form>}
@@ -581,24 +651,27 @@ export function SponsoredView() {
     })}</div>}
     {attempt && <section className="panel sponsored-attempt" aria-labelledby="sponsored-attempt-title">
       <div className="contest-section-heading"><div><div className="eyebrow">{attempt.field}</div><h2 id="sponsored-attempt-title">{attempt.title}</h2></div><span className="contest-status">{attempt.status.replaceAll('_', ' ')}</span></div>
-      {attempt.status === 'in_progress' && <p role="timer">Time remaining: {remaining == null ? '…' : `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`}</p>}
+      {attempt.status === 'in_progress' && <p role="timer" aria-live="off">Time remaining: {remaining == null ? '—' : `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`}</p>}
+      {attempt.status === 'in_progress' && remaining <= 60 && remaining > 30 && <p role="status">One minute remaining.</p>}
+      {attempt.status === 'in_progress' && remaining <= 30 && remaining > 0 && <p role="alert">30 seconds remaining.</p>}
       {!attemptIsOpen && attempt.status === 'in_progress' && <p role="status">This timed attempt has expired or its access window has closed. Saved progress is retained; the server controls the final deadline.</p>}
+      {attempt.status === 'timed_out' && <p role="status">Time expired. Your saved answers were finalized and graded{attempt.score != null ? ` (${attempt.score}%).` : '.'}</p>}
       <div className="assessment-question-list">{attempt.questions.map((question) => <fieldset className="lesson-section" key={question.id} disabled={!attemptIsOpen || busy}>
         <legend><strong>{question.order}. {question.prompt}</strong></legend>
         {question.options.map((option) => <label className="assessment-option" key={option}><input type="radio" name={`sponsored-${question.id}`} checked={answers[question.id] === option || question.selected_answer === option} onChange={() => updateAnswer(question.id, option)} />{option}</label>)}
         {question.requires_reasoning && <label>Written reasoning<textarea maxLength={5000} required={attemptIsOpen} value={reasoning[question.id] || question.written_reasoning || ''} onChange={(event) => updateReasoning(question.id, event.target.value)} /></label>}
-        {attempt.status === 'graded' && <p><strong>Correct answer:</strong> {question.correct_answer}<br />{question.rationale}</p>}
+        {attempt.status === 'graded' || attempt.status === 'timed_out' ? <p><strong>Correct answer:</strong> {question.correct_answer}<br />{question.rationale}</p> : null}
       </fieldset>)}</div>
       {attemptIsOpen && <button className="button button-primary" disabled={busy || answers && Object.keys(answers).length !== attempt.questions.length} onClick={submitAttempt}>{busy ? 'Submitting…' : 'Submit assessment'}</button>}
-      {attempt.status === 'graded' && <p role="status">Final score: {attempt.score}%</p>}
+      {(attempt.status === 'graded' || attempt.status === 'timed_out') && <p role="status">Final score: {attempt.score}%</p>}
     </section>}
-    {isAdmin && <section className="panel admin-support-applications"><div className="contest-section-heading"><div><div className="eyebrow">ADMIN ONLY · PRIVATE PAYMENT DETAILS</div><h2>Sponsored View payment review</h2><p>Verify payment references against M-Pesa before granting access. Each verified payment grants one attempt.</p></div><button className="button button-quiet" onClick={load}>↻ Refresh</button></div>
+    {isAdmin && <section className="panel admin-support-applications"><div className="contest-section-heading"><div><div className="eyebrow">ADMIN ONLY · PRIVATE PAYMENT DETAILS</div><h2>Sponsored View payment review</h2><p>Compare each submitted KES 20 reference with the company Till transactions, then confirm the payment before granting access. Each verified payment grants one attempt.</p></div><button className="button button-quiet" onClick={load}>↻ Refresh</button></div>
       {adminError ? <ErrorState message={adminError} retry={load} /> : adminPayments.length === 0 ? <Empty title="No Sponsored View payments to review" /> : <div className="support-application-list">{adminPayments.map((payment) => <article className="support-application-status" key={payment.id}><strong>{payment.student_name} · {payment.assessment_title}</strong><span>{payment.status} · KSh {payment.amount_kes}</span><small>{payment.student_email} · {payment.field} · {payment.payment_reference}</small>{payment.status === 'pending' && <div className="form-stack">
         <label>Confirmed M-Pesa transaction ID<input required value={transactionIds[payment.id] || ''} onChange={(event) => setTransactionIds((current) => ({ ...current, [payment.id]: event.target.value }))} /></label>
         <button className="button button-primary" disabled={busy} onClick={() => reviewPayment(payment, 'verified')}>Verify payment and grant access</button>
         <label>Rejection reason<input required value={rejectionReasons[payment.id] || ''} onChange={(event) => setRejectionReasons((current) => ({ ...current, [payment.id]: event.target.value }))} /></label>
         <button className="button button-quiet" disabled={busy} onClick={() => reviewPayment(payment, 'rejected')}>Reject payment</button>
-      </div>}</article>)}</div>}
+      </div>}{payment.status === 'verified' && <div className="form-stack"><label>Confirmed M-Pesa refund reference<input required value={transactionIds[payment.id] || ''} onChange={(event) => setTransactionIds((current) => ({ ...current, [payment.id]: event.target.value }))} /></label><label>Refund reason<input required value={rejectionReasons[payment.id] || ''} onChange={(event) => setRejectionReasons((current) => ({ ...current, [payment.id]: event.target.value }))} /></label><button className="button button-quiet" disabled={busy || !transactionIds[payment.id] || !rejectionReasons[payment.id]} onClick={() => reviewPayment(payment, 'refunded')}>Record confirmed refund and reverse reward</button></div>}</article>)}</div>}
     </section>}
   </Page>
 }

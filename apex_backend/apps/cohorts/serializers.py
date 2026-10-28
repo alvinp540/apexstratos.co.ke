@@ -123,7 +123,7 @@ class TutorialSerializer(serializers.ModelSerializer):
                 'options': question['options'],
                 'requires_reasoning': question.get('requires_reasoning', False),
             }
-            if attempt.status == 'graded':
+            if attempt.status in {'graded', 'timed_out'}:
                 item.update({
                     'correct_answer': question['correct_answer'],
                     'rationale': question.get('rationale', ''),
@@ -134,14 +134,10 @@ class TutorialSerializer(serializers.ModelSerializer):
 
         from .weekly_schedule import attempt_deadline
         try:
-            duration_seconds = (obj.duration_minutes or 20) * 60
-            deadline = attempt_deadline('tutorials', attempt.started_at, duration_seconds)
+            deadline = attempt.deadline_at or attempt_deadline('tutorials', attempt.started_at, 300)
         except ValueError:
             deadline = None
         now = timezone.now()
-        attempt_status = attempt.status
-        if deadline and now >= deadline and attempt.status == 'in_progress':
-            attempt_status = 'timed_out'
         return {
             'id': str(attempt.id),
             'tutorial': str(attempt.tutorial_id),
@@ -150,11 +146,12 @@ class TutorialSerializer(serializers.ModelSerializer):
             'answers': answers,
             'reasoning': reasoning,
             'score': attempt.score,
-            'status': attempt_status,
+            'status': attempt.status,
             'started_at': attempt.started_at,
             'submitted_at': attempt.submitted_at,
             'deadline_at': deadline,
             'server_time': now,
+            'time_remaining': max(0, int((deadline - now).total_seconds())) if deadline else 0,
         }
 
 
@@ -204,13 +201,23 @@ class CohortSerializer(serializers.ModelSerializer):
 
 
 class AssessmentAttemptSerializer(serializers.ModelSerializer):
+    server_time = serializers.SerializerMethodField()
+    time_remaining = serializers.SerializerMethodField()
+
     class Meta:
         model = AssessmentAttempt
         fields = (
-            'id', 'assessment', 'cohort', 'score', 'status', 'question_order',
-            'started_at', 'submitted_at', 'is_flagged',
+            'id', 'assessment', 'cohort', 'score', 'status', 'question_order', 'answers',
+            'started_at', 'deadline_at', 'server_time', 'time_remaining', 'submitted_at', 'is_flagged',
         )
         read_only_fields = fields
+
+    def get_server_time(self, obj):
+        return timezone.now()
+
+    def get_time_remaining(self, obj):
+        deadline = obj.deadline_at or (obj.started_at + timezone.timedelta(seconds=300))
+        return max(0, int((deadline - timezone.now()).total_seconds()))
 
 
 class HeartbeatSerializer(serializers.Serializer):

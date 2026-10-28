@@ -1,4 +1,4 @@
-export default function QuestionCard({ question, index, selected, onSelect }) {
+export default function QuestionCard({ question, index, selected, onSelect, disabled = false }) {
   return (
     <div className="card" style={{ marginBottom: '1rem' }}>
       <div style={{ fontWeight: 600, marginBottom: '0.75rem' }}>
@@ -18,7 +18,8 @@ export default function QuestionCard({ question, index, selected, onSelect }) {
           }}>
             <input
               type="radio" name={`q_${question.id}`} value={opt.id}
-              checked={selected === opt.id}
+              checked={String(selected) === String(opt.id)}
+              disabled={disabled}
               onChange={() => onSelect(String(question.id), opt.id)}
               style={{ display: 'none' }}
             />

@@ -17,6 +17,7 @@ import AdminDashboardPage from '../pages/AdminDashboardPage'
 import MentorshipPage from '../pages/MentorshipPage'
 import TeamsPage from '../pages/TeamsPage'
 import CommunitiesPage from '../pages/CommunitiesPage'
+import RewardsPage from '../pages/RewardsPage'
 import { introWatched } from '../components/common/HowItWorksTabs'
 import { Navigate, useLocation } from 'react-router-dom'
 
@@ -43,6 +44,7 @@ export default function AppRouter() {
           <Route path="/cohorts" element={<CohortsPage />} />
           <Route path="/rankings" element={<RankingsPage />} />
           <Route path="/opportunities" element={<OpportunityCenterPage />} />
+          <Route path="/rewards" element={<RewardsPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/profile" element={<ProfileSettingsPage />} />
         </Route>

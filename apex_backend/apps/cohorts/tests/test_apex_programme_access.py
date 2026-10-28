@@ -44,7 +44,7 @@ class ContestWindowTests(APITestCase):
         ))
         self.assertEqual(
             _attempt_deadline(sunday, 20 * 60, end),
-            end,
+            sunday + timedelta(minutes=20),
         )
 
     def test_weekday_has_no_open_contest_window(self):
@@ -259,7 +259,7 @@ class MainContestAccessTests(APITestCase):
         )
         self.client.force_authenticate(administrator)
         access_expiry = timezone.make_aware(
-            datetime(2026, 10, 19, 0, 0),
+            datetime(2027, 10, 19, 0, 0),
             ZoneInfo('Africa/Nairobi'),
         )
         response = self.client.post(
@@ -379,10 +379,51 @@ class MainContestAccessTests(APITestCase):
         self.assertEqual(first.data['id'], second.data['id'])
         self.assertEqual(
             first.data['deadline_at'],
-            timezone.make_aware(datetime(2026, 10, 19, 0, 0), ZoneInfo('Africa/Nairobi')),
+            sunday + timedelta(minutes=5),
         )
         self.assertNotIn('correct_answer', first.data['questions'][0])
         self.assertEqual(AssessmentScheduleAttempt.objects.count(), 1)
+
+    def test_timeout_uses_saved_attempt_answers_once_and_owner_access_is_scoped(self):
+        self.grant_main_contest_access()
+        assessment = self.make_published_assessment()
+        friday = timezone.make_aware(datetime(2026, 10, 16, 10), ZoneInfo('Africa/Nairobi'))
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday):
+            started = self.client.post(
+                reverse('contest-assessment-start', kwargs={'assessment_id': assessment.id}),
+                {}, format='json',
+            )
+        self.assertEqual(started.data['deadline_at'], friday + timedelta(seconds=300))
+        question = started.data['questions'][0]
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday + timedelta(minutes=4, seconds=55)):
+            saved = self.client.post(
+                reverse('contest-assessment-answers', kwargs={'attempt_id': started.data['id']}),
+                {'answers': {question['id']: 'A'}, 'reasoning': {}}, format='json',
+            )
+        self.assertEqual(saved.status_code, 200)
+
+        other = User.objects.create_user(
+            email='other-attempt-owner@example.test', username='other-attempt-owner', password='test-password',
+        )
+        self.client.force_authenticate(other)
+        denied = self.client.post(
+            reverse('contest-assessment-answers', kwargs={'attempt_id': started.data['id']}),
+            {'answers': {question['id']: 'B'}, 'reasoning': {}}, format='json',
+        )
+        self.assertEqual(denied.status_code, 404)
+        self.client.force_authenticate(self.student)
+
+        late_answers = {item['id']: 'A' for item in started.data['questions']}
+        submit_url = reverse('contest-assessment-submit', kwargs={'attempt_id': started.data['id']})
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday + timedelta(seconds=300)):
+            finalized = self.client.post(submit_url, {'answers': late_answers}, format='json')
+            repeated = self.client.post(submit_url, {'answers': late_answers}, format='json')
+        self.assertEqual(finalized.data['status'], 'timed_out')
+        self.assertEqual(finalized.data['score'], 10)
+        self.assertEqual(repeated.data['score'], 10)
+        attempt = AssessmentScheduleAttempt.objects.get()
+        self.assertEqual(attempt.status, 'timed_out')
+        self.assertEqual(len(attempt.answers), 1)
 
     def test_verified_contest_to_opportunity_application_and_confirmed_payment(self):
         Profile.objects.create(

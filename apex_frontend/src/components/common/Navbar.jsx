@@ -72,6 +72,7 @@ export default function Navbar() {
           <Link to="/communities" style={{ color: '#dbeafe', textDecoration: 'none', fontWeight: 600 }}>Communities</Link>
           <Link to="/cohorts" style={{ color: '#dbeafe', textDecoration: 'none', fontWeight: 600 }}>Cohorts</Link>
           <Link to="/opportunities" style={{ color: '#dbeafe', textDecoration: 'none', fontWeight: 600 }}>Opportunities</Link>
+          <Link to="/rewards" style={{ color: '#dbeafe', textDecoration: 'none', fontWeight: 600 }}>Rewards</Link>
           <Link to="/rankings" style={{ color: '#dbeafe', textDecoration: 'none', fontWeight: 600 }}>Leaderboard</Link>
           {user.role === 'vendor' && <Link to="/vendor" style={{ color: '#dbeafe', textDecoration: 'none', fontWeight: 600 }}>Vendor</Link>}
           {user.is_admin === true && <Link to="/admin" style={{ color: '#dbeafe', textDecoration: 'none', fontWeight: 600 }}>Admin</Link>}
