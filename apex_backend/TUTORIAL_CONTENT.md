@@ -9,7 +9,7 @@
 | Main Contest Library | 720 | 10 | 7,200 | KSh 20 per applicable access period |
 | **Total** | **2,160** | **10** | **21,600** | Programme-specific |
 
-These are target quantities, not live counts. Only complete, reviewed database records should be represented as available. Run `python manage.py audit_apexstratos_inventory` to report actual complete inventory and shortfalls. The current local database audit found 0/640 Tutorials, 0/800 Sponsored View assessments, and 0/720 Main Contest assessments (zero complete questions in each library).
+These are target quantities, not live counts. Only complete, reviewed database records should be represented as available. Run `python manage.py audit_apexstratos_inventory` to report actual complete inventory and shortfalls. The development database currently has 400 complete published Sponsored View assessments; production inventory must be checked separately after deployment.
 
 ## Question-first content
 
@@ -35,13 +35,13 @@ The Main Contest's 20-minute timer begins when the server creates the attempt. T
 
 ## Content status
 
-The local development database audit found zero assessment records and zero questions in all three required libraries. The original bundled packs contain the nominal target quantities (640 tutorials, 800 Sponsored View assessments, and 720 Main Contest assessments), but the source corpus is not ready to import or publish:
+The original bundled packs contain the nominal target quantities (640 tutorials, 800 Sponsored View assessments, and 720 Main Contest assessments), but the source corpus is not ready to import or publish in full:
 
 - An audit found 2,386 repeated question-prompt occurrences within packs across 21,600 question entries.
 - It found 4 duplicate tutorial, 21 duplicate Sponsored View, and 18 duplicate Main Contest assessment question sets.
 - Some generated scenario wording is inconsistent with its study area.
 - Medical and Health and Law and Society remain unpublished until qualified human review.
 
-The bootstrap command validates every pack before writing anything and rejects duplicate prompts and duplicate assessment sets. Its current validation failure is intentional: do not use `--apply` or represent the bundled nominal counts as complete, usable inventory until the source content has been corrected and reviewed. The remaining source content is original AI-authored material, not human expert-reviewed content. The importer is an append-only intake path, not a substitute for content quality review, licensing, or subject-matter expertise.
+The default bootstrap mode requires every pack to validate. Partial mode can import only complete valid packs and report invalid packs; it must not be used to claim the nominal bundled counts are complete. The remaining source content is original AI-authored material, not human expert-reviewed content. The importer is an append-only intake path, not a substitute for content quality review, licensing, or subject-matter expertise.
 
-To re-audit the database, run `python manage.py audit_apexstratos_inventory`. To validate the bundled source without writing, run `python manage.py bootstrap_apexstratos_libraries`. The current database shortfall remains 640 tutorials / 6,400 questions, 800 Sponsored View assessments / 8,000 questions, and 720 Main Contest assessments / 7,200 questions. Do not reset the database or advertise target quantities as if they were populated.
+To re-audit the database, run `python manage.py audit_apexstratos_inventory`. To validate the Sponsored View source without writing, run `python manage.py bootstrap_apexstratos_libraries --library sponsored-view --allow-partial --preserve-existing-slots`. After deploying the code and migrations, run that command with `--apply --publish --settings=apex_backend.settings.production` in the Render Shell to import only valid, non-conflicting Sponsored View content. Current bundled Sponsored View content includes duplicate-question packs that the importer deliberately skips; the command is idempotent, preserves existing assessments, and publishes only content that passes validation. Students still need an admin-verified KSh 20 payment to Till 1598106 before starting an attempt. Do not reset the database or advertise target quantities as if they were populated.

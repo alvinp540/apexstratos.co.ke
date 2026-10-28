@@ -53,6 +53,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            '--library',
+            choices=tuple(LIBRARY_COUNTS),
+            help='Import only one student library; by default all libraries are processed.',
+        )
+        parser.add_argument(
             '--apply',
             action='store_true',
             help='Append validated records to the database. Omit for a no-write dry run.',
@@ -97,6 +102,10 @@ class Command(BaseCommand):
         else:
             packs = self._validate_manifest(root, manifest)
             invalid_packs = []
+
+        if options['library']:
+            packs = [item for item in packs if item[0]['library'] == options['library']]
+            invalid_packs = [item for item in invalid_packs if item[0]['library'] == options['library']]
 
         report = {
             'mode': 'apply' if options['apply'] else 'dry-run',
