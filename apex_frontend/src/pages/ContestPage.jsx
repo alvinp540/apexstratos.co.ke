@@ -310,6 +310,10 @@ export default function ContestPage() {
       // Fetch the authoritative saved attempt before opening it; the list card can be stale.
       const { data } = await startMainContestAssessment(assessment.id)
       if (data.status !== 'in_progress') {
+        setErrors((current) => ({
+          ...current,
+          attempt: `The server returned this attempt as ${data.status || 'unavailable'}${data.score != null ? ` with a score of ${data.score}%.` : '.'} Only an in-progress attempt can be resumed.`,
+        }))
         await refreshContests()
         return
       }

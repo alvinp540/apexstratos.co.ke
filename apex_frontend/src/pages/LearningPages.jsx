@@ -437,6 +437,7 @@ export function SponsoredView() {
   const [adminError, setAdminError] = useState('')
   const [status, setStatus] = useState({ loading: true, error: '' })
   const timeoutRequest = useRef(false)
+  const attemptPanelRef = useRef(null)
   const isAdmin = user?.role === 'admin' || user?.is_admin
 
   const load = useCallback(async () => {
@@ -498,6 +499,15 @@ export function SponsoredView() {
       window.removeEventListener('focus', refreshAccess)
     }
   }, [filters, hasPendingStudentPayment])
+
+  useEffect(() => {
+    if (!attempt?.id) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      attemptPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      attemptPanelRef.current?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [attempt?.id])
 
   useEffect(() => {
     if (!attempt?.deadline_at || !attempt?.server_time || attempt.status !== 'in_progress') {
@@ -680,7 +690,7 @@ export function SponsoredView() {
         </div>}
       </article>
     })}</div>}
-    {attempt && <section className="panel sponsored-attempt" aria-labelledby="sponsored-attempt-title">
+    {attempt && <section ref={attemptPanelRef} className="panel sponsored-attempt" aria-labelledby="sponsored-attempt-title" tabIndex={-1}>
       <div className="contest-section-heading"><div><div className="eyebrow">{attempt.field}</div><h2 id="sponsored-attempt-title">{attempt.title}</h2></div><span className="contest-status">{attempt.status.replaceAll('_', ' ')}</span></div>
       {attempt.status === 'in_progress' && <p role="timer" aria-live="off">Time remaining: {remaining == null ? '—' : `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`}</p>}
       {attempt.status === 'in_progress' && remaining <= 60 && remaining > 30 && <p role="status">One minute remaining.</p>}
