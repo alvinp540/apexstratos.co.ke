@@ -31,8 +31,8 @@ export const saveMainContestAttemptAnswers = (attemptId, answers, reasoning = {}
   api.post(`/cohorts/contests/attempts/${attemptId}/answers/`, { answers, reasoning })
 export const submitMainContestAttempt = (attemptId, answers, reasoning = {}) =>
   api.post(`/cohorts/contests/attempts/${attemptId}/submit/`, { answers, reasoning })
-export const getMainContestPaymentReviews = () =>
-  api.get('/cohorts/admin/payments/main-contest/')
+export const getMainContestPaymentReviews = (params = {}) =>
+  api.get('/cohorts/admin/payments/main-contest/', { params })
 export const decideMainContestPayment = (paymentId, payload) =>
   api.post(`/cohorts/admin/payments/main-contest/${paymentId}/decision/`, payload)
 export const getSupportPrograms = () => api.get('/cohorts/support/programs/')

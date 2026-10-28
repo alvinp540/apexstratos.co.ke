@@ -270,6 +270,8 @@ class ParticipationPaymentAdminListView(APIView):
         payments = ParticipationPayment.objects.select_related(
             'user', 'verified_by',
         ).prefetch_related('events__actor').order_by('created_at')
+        if request.query_params.get('reviewable_only', '').lower() == 'true':
+            payments = payments.filter(status__in=('pending', 'under_review'))
         paginator = StandardResultsPagination()
         page = paginator.paginate_queryset(payments, request)
         return paginator.get_paginated_response([

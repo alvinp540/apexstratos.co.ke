@@ -6,6 +6,7 @@ import PlatformAnalyticsChart from '../components/admin/PlatformAnalyticsChart'
 import MentorsTab from '../components/admin/MentorsTab'
 import PSPRegistrations from '../components/admin/PSPRegistrations'
 import RewardsPanel from '../components/admin/RewardsPanel'
+import MainContestPaymentReviewsPanel from '../components/admin/MainContestPaymentReviewsPanel'
 import api from '../api/axiosInstance'
 import toast from 'react-hot-toast'
 
@@ -19,7 +20,7 @@ export default function AdminDashboardPage() {
     } catch { toast.error('Failed.') }
   }
 
-  const TABS = ['analytics', 'users', 'fraud', 'mentors', 'psp', 'rewards']
+  const TABS = ['analytics', 'users', 'fraud', 'mentors', 'psp', 'payments', 'rewards']
 
   return (
     <>
@@ -37,7 +38,7 @@ export default function AdminDashboardPage() {
               color: tab === t ? '#fff' : 'var(--color-text)',
               textTransform: 'capitalize',
             }}>
-              {t === 'analytics' ? 'Platform Analytics' : t === 'users' ? 'User Management' : t === 'fraud' ? 'Fraud Monitor' : t === 'mentors' ? 'Mentors' : t === 'psp' ? 'PSP Registrations' : 'Rewards & Payouts'}
+              {t === 'analytics' ? 'Platform Analytics' : t === 'users' ? 'User Management' : t === 'fraud' ? 'Fraud Monitor' : t === 'mentors' ? 'Mentors' : t === 'psp' ? 'PSP Registrations' : t === 'payments' ? 'Payment Reviews' : 'Rewards & Payouts'}
             </button>
           ))}
         </div>
@@ -47,6 +48,7 @@ export default function AdminDashboardPage() {
         {tab === 'fraud' && <FraudMonitorPanel />}
         {tab === 'mentors' && <MentorsTab />}
         {tab === 'psp' && <PSPRegistrations />}
+        {tab === 'payments' && <MainContestPaymentReviewsPanel />}
         {tab === 'rewards' && <RewardsPanel />}
       </div>
     </>
