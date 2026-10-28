@@ -6,7 +6,7 @@
 |---|---:|---:|---:|---|
 | Tutorial Library | 640 | 10 | 6,400 | Free |
 | Sponsored View Library | 800 | 10 | 8,000 | KSh 20 per attempt |
-| Main Contest Library | 720 | 10 | 7,200 | KSh 100 per applicable access period |
+| Main Contest Library | 720 | 10 | 7,200 | KSh 20 per applicable access period |
 | **Total** | **2,160** | **10** | **21,600** | Programme-specific |
 
 These are target quantities, not live counts. Only complete, reviewed database records should be represented as available. Run `python manage.py audit_apexstratos_inventory` to report actual complete inventory and shortfalls. The current local database audit found 0/640 Tutorials, 0/800 Sponsored View assessments, and 0/720 Main Contest assessments (zero complete questions in each library).

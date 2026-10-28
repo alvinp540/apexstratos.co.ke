@@ -44,16 +44,16 @@ export default function RewardsPage() {
     <Navbar />
     <main className="page-container">
       <div className="contest-section-heading">
-        <div><div className="eyebrow">STUDENT REWARDS</div><h1>Rewards & payouts</h1><p>Daily KES 100 awards are based on verified participation and assessment performance. Claim review and payout confirmation are tracked separately.</p></div>
+        <div><div className="eyebrow">STUDENT REWARDS</div><h1>Rewards & payouts</h1><p>Each Sponsored View reward cycle closes after ten eligible, finalized KES 20 participations. The highest-ranked eligible student wins KES 100; claim review and payout confirmation are tracked separately.</p></div>
         <button className="button button-quiet" onClick={load} disabled={loading}>Refresh</button>
       </div>
       {error && <p role="alert" className="error-message">{error}</p>}
-      {loading ? <p>Loading rewards…</p> : claims.length === 0 ? <section className="card"><h2>No rewards yet</h2><p>Confirmed awards will appear here after a daily settlement.</p></section> : <div className="support-programme-list">
+      {loading ? <p>Loading rewards…</p> : claims.length === 0 ? <section className="card"><h2>No rewards yet</h2><p>Confirmed awards will appear here when a ten-completion cycle is finalized.</p></section> : <div className="support-programme-list">
         {claims.map((claim) => <article className="support-programme-card" key={claim.id}>
           <div className="tutorial-card-top"><span className="tag">KES {claim.amount_kes}</span><span className={`contest-status status-${claim.status}`}>{claim.status.replaceAll('_', ' ')}</span></div>
           <h2>{claim.tutorial}</h2>
           <div className="support-programme-facts">
-            <span>Capability: {claim.capability}</span><span>Settlement: {claim.settlement_date}</span>
+            <span>Capability: {claim.capability}</span><span>Cycle: {claim.cycle_number ?? 'historical'} · finalized {claim.settlement_date}</span>
             <span>Selection: {claim.selection}</span><span>Score: {claim.score}% (rank {claim.rank})</span>
             <span>M-Pesa destination: {claim.masked_destination || 'Add a phone number to your account'}</span>
             {claim.payout_reference && <span>Provider reference: {claim.payout_reference}</span>}

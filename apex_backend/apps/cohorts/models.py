@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils import timezone
 import uuid
 import re
 from math import isfinite
@@ -661,6 +662,7 @@ class SponsoredViewQuestion(models.Model):
 
 
 class SponsoredViewPayment(models.Model):
+    PAYMENT_TILL_NUMBER = '1598106'
     STATUS_CHOICES = [
         ('pending', 'Pending verification'),
         ('verified', 'Verified'),
@@ -673,6 +675,7 @@ class SponsoredViewPayment(models.Model):
     user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='sponsored_view_payments')
     assessment = models.ForeignKey(SponsoredViewAssessment, on_delete=models.PROTECT, related_name='payments')
     amount_kes = models.PositiveSmallIntegerField(default=20)
+    till_number = models.CharField(max_length=20, default=PAYMENT_TILL_NUMBER)
     payment_reference = models.CharField(max_length=255)
     mpesa_transaction_id = models.CharField(max_length=255, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='pending', db_index=True)
@@ -1190,15 +1193,94 @@ class SponsoredViewDailySettlement(models.Model):
     attempt_count = models.PositiveIntegerField(default=1)
     error_message = models.TextField(blank=True)
     idempotency_key = models.CharField(max_length=160, unique=True)
+    reward_cycle = models.OneToOneField(
+        'SponsoredViewRewardCycle', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='settlement_record',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     finalized_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'sponsored_view_daily_settlements'
-        constraints = [models.UniqueConstraint(
-            fields=['assessment', 'settlement_date'], name='unique_sponsored_daily_settlement'
-        )]
         indexes = [models.Index(fields=['settlement_date', 'capability'])]
+
+
+class SponsoredViewRewardCycle(models.Model):
+    STATUS_CHOICES = [
+        ('open', 'Open'), ('full', 'Full'), ('finalizing', 'Finalizing'),
+        ('finalized', 'Finalized'), ('failed', 'Finalization failed'),
+        ('exception', 'Eligibility exception'),
+    ]
+    PAYOUT_STATUS_CHOICES = [
+        ('not_awarded', 'Not awarded'), ('claim_required', 'Claim required'),
+        ('claim_submitted', 'Claim submitted'), ('verified', 'Merit verified'),
+        ('payout_pending', 'Payout pending'), ('paid', 'Paid'),
+        ('rejected', 'Claim rejected'), ('reversed', 'Reversed'),
+        ('recovery_required', 'Payout recovery required'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    assessment = models.ForeignKey(
+        SponsoredViewAssessment, on_delete=models.PROTECT, related_name='reward_cycles',
+    )
+    capability = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
+    cycle_number = models.PositiveIntegerField()
+    participation_fee_kes = models.PositiveSmallIntegerField(default=20)
+    financial_rule_version = models.CharField(max_length=32, default='10-completion-50-50-v1')
+    target_completion_count = models.PositiveSmallIntegerField(default=10)
+    eligible_completion_count = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='open', db_index=True)
+    opened_at = models.DateTimeField(default=timezone.now)
+    full_at = models.DateTimeField(null=True, blank=True)
+    finalized_at = models.DateTimeField(null=True, blank=True)
+    winner = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.PROTECT, related_name='sponsored_view_cycle_wins',
+    )
+    ranking_snapshot = models.JSONField(default=list)
+    gross_revenue_kes = models.PositiveIntegerField(default=0)
+    platform_allocation_kes = models.PositiveIntegerField(default=0)
+    rewards_allocation_kes = models.PositiveIntegerField(default=0)
+    award_amount_kes = models.PositiveSmallIntegerField(default=100)
+    settlement_status = models.CharField(max_length=16, default='pending', db_index=True)
+    payout_status = models.CharField(max_length=24, choices=PAYOUT_STATUS_CHOICES, default='not_awarded', db_index=True)
+    finalization_attempt_count = models.PositiveIntegerField(default=0)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'sponsored_view_reward_cycles'
+        constraints = [
+            models.UniqueConstraint(fields=('assessment', 'cycle_number'), name='unique_sponsored_reward_cycle_number'),
+            models.UniqueConstraint(fields=('assessment',), condition=models.Q(status='open'), name='unique_open_sponsored_reward_cycle'),
+        ]
+        indexes = [models.Index(fields=('assessment', 'status', 'cycle_number'))]
+        ordering = ('assessment_id', 'cycle_number')
+
+
+class SponsoredViewRewardCycleEntry(models.Model):
+    STATUS_CHOICES = [('eligible', 'Eligible'), ('refunded', 'Refunded'), ('ineligible', 'Ineligible')]
+    cycle = models.ForeignKey(
+        SponsoredViewRewardCycle, on_delete=models.PROTECT, related_name='entries',
+    )
+    payment = models.OneToOneField(
+        SponsoredViewPayment, on_delete=models.PROTECT, related_name='reward_cycle_entry',
+    )
+    attempt = models.OneToOneField(
+        SponsoredViewAttempt, on_delete=models.PROTECT, related_name='reward_cycle_entry',
+    )
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='sponsored_view_reward_cycle_entries')
+    score = models.FloatField()
+    submitted_at = models.DateTimeField()
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='eligible', db_index=True)
+    rank = models.PositiveSmallIntegerField(null=True, blank=True)
+    eligibility_snapshot = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sponsored_view_reward_cycle_entries'
+        constraints = [
+            models.UniqueConstraint(fields=('cycle', 'user'), name='unique_student_per_sponsored_reward_cycle'),
+        ]
+        indexes = [models.Index(fields=('cycle', 'score', 'submitted_at'))]
 
 
 class SponsoredViewRewardAward(models.Model):
@@ -1208,6 +1290,10 @@ class SponsoredViewRewardAward(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     settlement = models.ForeignKey(
         SponsoredViewDailySettlement, on_delete=models.PROTECT, related_name='awards'
+    )
+    reward_cycle = models.ForeignKey(
+        SponsoredViewRewardCycle, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='awards',
     )
     user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='sponsored_view_rewards')
     payment = models.OneToOneField(
@@ -1284,6 +1370,10 @@ class SponsoredViewSettlementAdjustment(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     settlement = models.ForeignKey(
         SponsoredViewDailySettlement, null=True, blank=True,
+        on_delete=models.PROTECT, related_name='adjustments',
+    )
+    reward_cycle = models.ForeignKey(
+        SponsoredViewRewardCycle, null=True, blank=True,
         on_delete=models.PROTECT, related_name='adjustments',
     )
     payment = models.OneToOneField(

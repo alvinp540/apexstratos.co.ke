@@ -1,4 +1,3 @@
-from datetime import date, timedelta, datetime
 import re
 
 from django.db import IntegrityError, transaction
@@ -16,9 +15,9 @@ from .models import (
     SponsoredViewDailySettlement,
     SponsoredViewRewardClaim,
     SponsoredViewSettlementAdjustment,
+    SponsoredViewRewardCycle,
 )
-from .reward_settlement import settle_daily_sponsored_view
-from .weekly_schedule import EAT
+from .reward_cycles import finalize_sponsored_reward_cycle, retry_failed_sponsored_reward_cycles
 
 
 class RewardClaimSubmissionSerializer(serializers.Serializer):
@@ -30,13 +29,17 @@ def _claim_payload(claim):
     phone = (claim.user.phone_number or '').strip()
     masked_phone = f'••••{phone[-3:]}' if len(phone) >= 3 else ''
     award = claim.award
+    cycle = award.reward_cycle
+    settlement = award.settlement
     return {
         'id': str(claim.id),
         'award_id': str(award.id),
         'amount_kes': award.amount_kes,
-        'tutorial': award.settlement.assessment.title,
-        'capability': award.settlement.capability,
-        'settlement_date': award.settlement.settlement_date,
+        'tutorial': settlement.assessment.title,
+        'capability': settlement.capability,
+        'settlement_date': settlement.settlement_date,
+        'cycle_id': str(cycle.id) if cycle else None,
+        'cycle_number': cycle.cycle_number if cycle else None,
         'selection': award.selection,
         'score': award.score,
         'rank': award.rank,
@@ -88,6 +91,10 @@ class SubmitRewardClaimView(APIView):
             claim.consented_at = timezone.now()
             claim.submitted_at = timezone.now()
             claim.save(update_fields=('payment_method', 'status', 'consented_at', 'submitted_at', 'updated_at'))
+            if claim.award.reward_cycle_id:
+                cycle = claim.award.reward_cycle
+                cycle.payout_status = 'claim_submitted'
+                cycle.save(update_fields=('payout_status',))
         return Response(_claim_payload(claim), status=status.HTTP_200_OK)
 
 
@@ -107,7 +114,9 @@ class AdminRewardSettlementsView(APIView):
             results.append({
                 'id': str(row.id), 'assessment_id': str(row.assessment_id),
                 'tutorial': row.assessment.title, 'capability': row.capability,
+                'reward_cycle_id': str(row.reward_cycle_id) if row.reward_cycle_id else None,
                 'settlement_date': row.settlement_date, 'eligible_participant_count': row.eligible_participant_count,
+                'cycle_number': row.reward_cycle.cycle_number if row.reward_cycle_id else None,
                 'total_revenue_kes': row.total_revenue_kes, 'platform_share_kes': row.platform_share_kes,
                 'rewards_budget_kes': row.rewards_budget_kes, 'primary_winner_count': row.primary_winner_count,
                 'secondary_winner_count': row.secondary_winner_count, 'awarded_total_kes': row.awarded_total_kes,
@@ -149,16 +158,76 @@ class AdminRewardSettlementsView(APIView):
         })
 
     def post(self, request):
-        raw_date = request.data.get('date')
-        try:
-            settlement_date = date.fromisoformat(raw_date) if raw_date else datetime.now(EAT).date() - timedelta(days=1)
-        except (TypeError, ValueError):
-            raise serializers.ValidationError({'date': 'Use an ISO date in YYYY-MM-DD format.'})
-        result = settle_daily_sponsored_view(settlement_date)
+        result = retry_failed_sponsored_reward_cycles()
         return Response({
-            'date': settlement_date,
-            'settlements': [str(row.id) for row, _created in result],
-            'created_count': sum(1 for _row, created in result if created),
+            'retried_count': len(result),
+            'finalized_count': sum(1 for cycle in result if cycle.status in {'finalized', 'exception'}),
+            'failed_count': sum(1 for cycle in result if cycle.status == 'failed'),
+        })
+
+
+class AdminRewardCyclesView(APIView):
+    permission_classes = (IsAdmin,)
+
+    def get(self, request):
+        cycles = SponsoredViewRewardCycle.objects.select_related(
+            'assessment', 'winner', 'settlement_record',
+        ).prefetch_related('entries__payment', 'entries__user').order_by(
+            '-opened_at', 'assessment__field', 'cycle_number',
+        )[:300]
+        return Response({'results': [{
+            'id': str(cycle.id),
+            'tutorial': cycle.assessment.title,
+            'assessment_id': str(cycle.assessment_id),
+            'capability': cycle.capability,
+            'cycle_number': cycle.cycle_number,
+            'status': cycle.status,
+            'settlement_status': cycle.settlement_status,
+            'payout_status': cycle.payout_status,
+            'participation_fee_kes': cycle.participation_fee_kes,
+            'target_completion_count': cycle.target_completion_count,
+            'eligible_completion_count': cycle.eligible_completion_count,
+            'opened_at': cycle.opened_at,
+            'full_at': cycle.full_at,
+            'finalized_at': cycle.finalized_at,
+            'winner': ({
+                'id': str(cycle.winner_id),
+                'name': cycle.winner.get_full_name() or cycle.winner.username,
+                'email': cycle.winner.email,
+            } if cycle.winner_id else None),
+            'ranking': cycle.ranking_snapshot,
+            'gross_revenue_kes': cycle.gross_revenue_kes,
+            'platform_allocation_kes': cycle.platform_allocation_kes,
+            'rewards_allocation_kes': cycle.rewards_allocation_kes,
+            'award_amount_kes': cycle.award_amount_kes,
+            'finalization_attempt_count': cycle.finalization_attempt_count,
+            'error_message': cycle.error_message,
+            'entries': [{
+                'user_id': str(entry.user_id),
+                'student': entry.user.get_full_name() or entry.user.username,
+                'email': entry.user.email,
+                'payment_reference': entry.payment.payment_reference,
+                'till_number': entry.payment.till_number,
+                'mpesa_transaction_id': entry.payment.mpesa_transaction_id,
+                'payment_status': entry.payment.status,
+                'attempt_id': str(entry.attempt_id),
+                'attempt_status': entry.attempt.status,
+                'score': entry.score,
+                'rank': entry.rank,
+                'entry_status': entry.status,
+                'submitted_at': entry.submitted_at,
+            } for entry in cycle.entries.all()],
+        } for cycle in cycles]})
+
+    def post(self, request, cycle_id=None):
+        if cycle_id:
+            cycle = finalize_sponsored_reward_cycle(cycle_id)
+            return Response({'id': str(cycle.id), 'status': cycle.status, 'error_message': cycle.error_message})
+        result = retry_failed_sponsored_reward_cycles()
+        return Response({
+            'retried_count': len(result),
+            'finalized_count': sum(1 for cycle in result if cycle.status in {'finalized', 'exception'}),
+            'failed_count': sum(1 for cycle in result if cycle.status == 'failed'),
         })
 
 
@@ -198,7 +267,7 @@ class AdminRewardClaimsView(APIView):
                 except SponsoredViewAttempt.DoesNotExist:
                     return Response({'status': 'The source assessment attempt is unavailable.'}, status=status.HTTP_409_CONFLICT)
                 if (
-                    attempt.status != 'graded' or attempt.is_flagged or attempt.score is None
+                    attempt.status not in {'graded', 'timed_out'} or attempt.is_flagged or attempt.score is None
                     or attempt.score != award.score or attempt.user_id != claim.user_id
                     or attempt.assessment_id != award.payment.assessment_id
                 ):
@@ -243,6 +312,10 @@ class AdminRewardClaimsView(APIView):
                     claim.save()
             except IntegrityError:
                 return Response({'payout_reference': 'This provider reference is already recorded.'}, status=status.HTTP_409_CONFLICT)
+            if claim.award.reward_cycle_id:
+                cycle = claim.award.reward_cycle
+                cycle.payout_status = claim.status
+                cycle.save(update_fields=('payout_status',))
             if action_value in {'verify', 'queue_payout', 'confirm_paid', 'reject'}:
                 send_notification(
                     user=claim.user,

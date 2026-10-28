@@ -44,6 +44,7 @@ from .review_views import AdminAssessmentReviewActionView, AdminAssessmentReview
 from .rewards_views import (
     AdminRewardClaimsView,
     AdminRewardSettlementsView,
+    AdminRewardCyclesView,
     MyRewardClaimsView,
     SubmitRewardClaimView,
 )
@@ -52,6 +53,8 @@ urlpatterns = [
     path('rewards/', MyRewardClaimsView.as_view(), name='my-sponsored-rewards'),
     path('rewards/<uuid:claim_id>/claim/', SubmitRewardClaimView.as_view(), name='submit-sponsored-reward-claim'),
     path('admin/rewards/settlements/', AdminRewardSettlementsView.as_view(), name='admin-reward-settlements'),
+    path('admin/rewards/cycles/', AdminRewardCyclesView.as_view(), name='admin-reward-cycles'),
+    path('admin/rewards/cycles/<uuid:cycle_id>/retry/', AdminRewardCyclesView.as_view(), name='admin-reward-cycle-retry'),
     path('admin/rewards/claims/', AdminRewardClaimsView.as_view(), name='admin-reward-claims'),
     path('admin/rewards/claims/<uuid:claim_id>/', AdminRewardClaimsView.as_view(), name='admin-reward-claim-decision'),
     path('admin/content/', AdminAssessmentReviewListView.as_view(), name='admin-assessment-review-list'),

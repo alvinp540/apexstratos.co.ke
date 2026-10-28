@@ -84,6 +84,21 @@ def _attempt_response(attempt):
                 'written_reasoning': reasoning.get(question['id'], ''),
             })
         questions.append(item)
+    try:
+        cycle_entry = attempt.reward_cycle_entry
+    except Exception:
+        cycle_entry = None
+    reward_cycle = None
+    if cycle_entry:
+        reward_cycle = {
+            'id': str(cycle_entry.cycle_id),
+            'cycle_number': cycle_entry.cycle.cycle_number,
+            'status': cycle_entry.cycle.status,
+            'eligible_completion_count': cycle_entry.cycle.eligible_completion_count,
+            'target_completion_count': cycle_entry.cycle.target_completion_count,
+            'rank': cycle_entry.rank,
+            'winner': cycle_entry.cycle.winner_id == attempt.user_id,
+        }
     return {
         'id': str(attempt.id),
         'payment_id': str(attempt.payment_id),
@@ -100,6 +115,26 @@ def _attempt_response(attempt):
         'server_time': now,
         'time_remaining': max(0, int((attempt.deadline_at - now).total_seconds())),
         'submitted_at': attempt.submitted_at,
+        'reward_cycle': reward_cycle,
+    }
+
+
+def _current_reward_cycle_summary(assessment):
+    from .models import SponsoredViewRewardCycle
+    cycle = SponsoredViewRewardCycle.objects.filter(assessment=assessment).order_by('-cycle_number').first()
+    if not cycle:
+        return {
+            'cycle_number': 1,
+            'status': 'open',
+            'eligible_completion_count': 0,
+            'target_completion_count': 10,
+        }
+    return {
+        'id': str(cycle.id),
+        'cycle_number': cycle.cycle_number,
+        'status': cycle.status,
+        'eligible_completion_count': cycle.eligible_completion_count,
+        'target_completion_count': cycle.target_completion_count,
     }
 
 
@@ -117,6 +152,8 @@ def _finalize_sponsored_view_timeout(attempt, completed_at):
     attempt.status = 'timed_out'
     attempt.submitted_at = completed_at
     attempt.save(update_fields=('score', 'status', 'submitted_at'))
+    from .reward_cycles import record_sponsored_view_completion
+    record_sponsored_view_completion(attempt.id)
     from .support_views import sync_support_eligibilities_for_user
     sync_support_eligibilities_for_user(attempt.user)
     return attempt
@@ -192,6 +229,7 @@ class SponsoredViewAssessmentListView(APIView):
                 'active_entry_limit': 5,
                 'has_verified_access': bool(verified_payment),
                 'can_start': bool(window and verified_payment),
+                'reward_cycle': _current_reward_cycle_summary(assessment),
                 'window_closes_at': window[1] if window else None,
                 'next_opening_at': None if window else next_opening('sponsored_view', now),
                 'payment_status': payment.status if payment else None,
@@ -212,6 +250,7 @@ class SponsoredViewPaymentListView(APIView):
                 'assessment_title': payment.assessment.title,
                 'field': payment.assessment.field,
                 'amount_kes': payment.amount_kes,
+                'till_number': payment.till_number,
                 'payment_reference': payment.payment_reference,
                 'status': payment.status,
                 'rejection_reason': payment.rejection_reason,
@@ -289,6 +328,7 @@ class SponsoredViewPaymentCreateView(APIView):
                     user=request.user,
                     assessment=assessment,
                     amount_kes=20,
+                    till_number=SponsoredViewPayment.PAYMENT_TILL_NUMBER,
                     payment_reference=serializer.validated_data['payment_reference'],
                 )
             except IntegrityError:
@@ -301,6 +341,7 @@ class SponsoredViewPaymentCreateView(APIView):
             'assessment_id': str(assessment.id),
             'assessment_title': assessment.title,
             'amount_kes': payment.amount_kes,
+            'till_number': payment.till_number,
             'payment_reference': payment.payment_reference,
             'status': payment.status,
             'message': 'Access is granted as soon as an administrator verifies the KSh 20 payment.',
@@ -324,6 +365,7 @@ class SponsoredViewPaymentAdminListView(APIView):
                 'assessment_title': payment.assessment.title,
                 'field': payment.assessment.field,
                 'amount_kes': payment.amount_kes,
+                'till_number': payment.till_number,
                 'payment_reference': payment.payment_reference,
                 'mpesa_transaction_id': payment.mpesa_transaction_id,
                 'status': payment.status,
@@ -385,6 +427,14 @@ class SponsoredViewPaymentDecisionView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if next_status == 'verified' and (
+                payment.amount_kes != 20
+                or payment.till_number != SponsoredViewPayment.PAYMENT_TILL_NUMBER
+            ):
+                return Response(
+                    {'error': 'Confirm a KES 20 payment to company M-Pesa Till 1598106 before verifying access.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if next_status == 'verified' and (
                 ParticipationPayment.objects.filter(mpesa_transaction_id=transaction_id).exists()
                 or SponsoredViewPayment.objects.exclude(id=payment.id).filter(
                     mpesa_transaction_id=transaction_id,
@@ -409,26 +459,56 @@ class SponsoredViewPaymentDecisionView(APIView):
             if is_refund:
                 award = SponsoredViewRewardAward.objects.select_for_update().filter(payment=payment).first()
                 claim = SponsoredViewRewardClaim.objects.select_for_update().filter(award=award).first() if award else None
-                settlement = None
-                if payment.verified_at:
+                try:
+                    cycle_entry = payment.reward_cycle_entry
+                except Exception:
+                    cycle_entry = None
+                cycle = cycle_entry.cycle if cycle_entry else None
+                counted_in_settlement = False
+                settlement = award.settlement if award else None
+                if cycle and cycle.status in {'finalized', 'exception'}:
+                    settlement = getattr(cycle, 'settlement_record', None)
+                elif payment.verified_at:
                     settlement_day = payment.verified_at.astimezone(EAT).date()
                     settlement = SponsoredViewDailySettlement.objects.filter(
                         assessment=payment.assessment,
                         settlement_date=settlement_day,
                         status='finalized',
+                        reward_cycle__isnull=True,
                     ).first()
-                attempt = SponsoredViewAttempt.objects.filter(
-                    payment=payment,
-                    status='graded',
-                    is_flagged=False,
-                    submitted_at__gte=settlement.period_start if settlement else timezone.now(),
-                    submitted_at__lt=settlement.period_end if settlement else timezone.now(),
-                ).first()
-                counted_in_settlement = bool(settlement and attempt and attempt.submitted_at)
+                if cycle and cycle.status not in {'finalized', 'exception'}:
+                    cycle_entry.status = 'refunded'
+                    cycle_entry.save(update_fields=('status',))
+                    cycle.eligible_completion_count = cycle.entries.filter(status='eligible').count()
+                    if cycle.status in {'full', 'failed'}:
+                        cycle.status = 'open'
+                        cycle.full_at = None
+                        cycle.save(update_fields=('eligible_completion_count', 'status', 'full_at'))
+                    else:
+                        cycle.save(update_fields=('eligible_completion_count',))
+                    settlement = None
+                elif cycle:
+                    cycle_entry.status = 'refunded'
+                    cycle_entry.save(update_fields=('status',))
+                else:
+                    attempt = SponsoredViewAttempt.objects.filter(
+                        payment=payment,
+                        status__in=('graded', 'timed_out'),
+                        is_flagged=False,
+                        submitted_at__gte=settlement.period_start if settlement else timezone.now(),
+                        submitted_at__lt=settlement.period_end if settlement else timezone.now(),
+                    ).first()
+                    if not award:
+                        settlement = None
+                    counted_in_settlement = bool(settlement and attempt and attempt.submitted_at)
+                if cycle and cycle.status in {'finalized', 'exception'}:
+                    counted_in_settlement = bool(settlement)
+                payout_recovery_required = bool(claim and claim.status == 'paid')
                 try:
                     with transaction.atomic():
                         SponsoredViewSettlementAdjustment.objects.create(
                             settlement=settlement,
+                            reward_cycle=cycle,
                             payment=payment,
                             actor=request.user,
                             refunded_amount_kes=payment.amount_kes,
@@ -437,7 +517,7 @@ class SponsoredViewPaymentDecisionView(APIView):
                             platform_share_reversal_kes=payment.amount_kes // 2 if counted_in_settlement else 0,
                             rewards_share_reversal_kes=payment.amount_kes - payment.amount_kes // 2 if counted_in_settlement else 0,
                             award_reversal_kes=award.amount_kes if award and award.status == 'awarded' else 0,
-                            payout_recovery_required=bool(claim and claim.status == 'paid'),
+                            payout_recovery_required=payout_recovery_required,
                             reason=payment.rejection_reason,
                         )
                 except IntegrityError as error:
@@ -454,6 +534,11 @@ class SponsoredViewPaymentDecisionView(APIView):
                         claim.status = 'reversed'
                         claim.rejection_reason = payment.rejection_reason
                         claim.save(update_fields=('status', 'rejection_reason', 'updated_at'))
+                    if cycle:
+                        cycle.payout_status = (
+                            'recovery_required' if payout_recovery_required else 'reversed'
+                        )
+                        cycle.save(update_fields=('payout_status',))
             title = 'Sponsored View payment verified' if next_status == 'verified' else f'Sponsored View payment {next_status}'
             message = (
                 f'Your KSh 20 payment for {payment.assessment.title} is verified. '
@@ -596,6 +681,8 @@ class SubmitSponsoredViewAttemptView(APIView):
             if attempt.status in {'graded', 'timed_out'}:
                 from .support_views import sync_support_eligibilities_for_user
                 sync_support_eligibilities_for_user(attempt.user)
+                from .reward_cycles import record_sponsored_view_completion
+                record_sponsored_view_completion(attempt.id)
                 return Response(_attempt_response(attempt))
             if attempt.status != 'in_progress':
                 return Response({'error': 'This assessment attempt is no longer active.'}, status=status.HTTP_409_CONFLICT)
@@ -644,6 +731,8 @@ class SubmitSponsoredViewAttemptView(APIView):
             attempt.status = 'graded'
             attempt.submitted_at = now
             attempt.save(update_fields=('answers', 'score', 'status', 'submitted_at'))
+            from .reward_cycles import record_sponsored_view_completion
+            record_sponsored_view_completion(attempt.id)
             from .support_views import sync_support_eligibilities_for_user
             sync_support_eligibilities_for_user(attempt.user)
         return Response(_attempt_response(attempt))

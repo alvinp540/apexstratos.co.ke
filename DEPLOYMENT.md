@@ -50,15 +50,15 @@ Campaign budgets are proposed/approved amounts only. Billing, payment processing
 
 ## Sponsored Rewards and Monthly Merit Sponsorships
 
-Sponsored View reward settlement reuses administrator-verified KES 20 Sponsored View payments and their completed, unflagged assessment attempts. A student's payment is counted once per tutorial/day, and the assessment score controls eligibility and ranking; payment alone cannot win. The default reward thresholds are a 70% minimum eligibility score and 90% primary threshold. Administrators configure these on the assessment before attempts begin; assessment editing is locked once attempts exist. Ties resolve by score descending, submission time ascending, then student UUID ascending.
+Sponsored View rewards use independent cycles for each sponsored assessment/tutorial and capability. A cycle contains ten distinct, admin-verified KES 20 payments to company M-Pesa Till `1598106` and ten finalized, unflagged assessment attempts; timed-out attempts count when the existing assessment engine finalized their saved answers. Payment alone does not create merit. The highest-scoring eligible participant wins one KES 100 award, with ties resolved by score descending, submission time ascending, then student UUID ascending. The assessment's published minimum score remains the eligibility cutoff.
 
-Each settlement uses the Africa/Nairobi calendar day, allocates half of eligible revenue to the platform and half to the reward pool, issues whole KES 100 awards only, and retains any remainder in the recorded reserve. The management command is safe to rerun for the same assessment and date:
+A full cycle records KES 200 gross revenue, KES 100 platform allocation and KES 100 rewards allocation. Cycle finalization and winner notification happen transactionally when the tenth eligible completion is recorded; a new cycle opens for that assessment and capability immediately. Existing daily settlement rows and awards remain available as historical records, but new awards are not triggered by a calendar date. The optional recovery command retries only failed cycle finalizations:
 
 ```powershell
-python manage.py settle_sponsored_rewards --date 2026-10-27 --settings=apex_backend.settings.production
+python manage.py settle_sponsored_rewards --settings=apex_backend.settings.production
 ```
 
-For Render, configure a Cron Job using the backend root directory, the production environment, and `python manage.py settle_sponsored_rewards --settings=apex_backend.settings.production`. Run daily at 21:15 UTC (00:15 the following day in Nairobi); the command settles the previous EAT date by default. Keep this as a separate Cron Job; do not run settlement from every web or worker startup. Before enabling it, deploy the additive cohorts migrations and verify the first result through the admin dashboard. Settlement errors are recorded for retries. Refunds after settlement create separate reversal adjustments and never rewrite finalized settlement totals; if an already paid award is reversed, the adjustment flags manual payout recovery for reconciliation.
+Cycle finalization does not require a Render Cron Job. If a recovery schedule is desired, run the command periodically as a separate Cron Job to retry failed finalizations; remove any old `--date` argument from the prior daily-settlement schedule. Do not run it from each web or worker startup. Refunds and chargebacks create separate audited adjustments; finalized cycle ranking and allocations are not silently rewritten, and paid-award reversals flag manual payout recovery.
 
 Deploy the additive database schema after taking a production PostgreSQL backup:
 
@@ -89,6 +89,16 @@ python manage.py bootstrap_apexstratos_libraries --allow-partial --preserve-exis
 The `--apply` and `--publish` options must not be used against production without an approved deployment, a database backup, and a zero-failure content report. Never publish Medical and Health or Law and Society content before its required qualified review. Reconcile database and API inventories after any import; a successful command alone does not establish that the target library is complete or published.
 
 ## Production Configuration
+
+### Render Web Service
+
+When Render's service root is already `apex_backend` (as in logs whose working path ends with `/src/apex_backend`), use this Start Command; do not prepend `cd apex_backend`:
+
+```bash
+python manage.py migrate --noinput --settings=apex_backend.settings.production && exec daphne -b 0.0.0.0 -p "$PORT" apex_backend.asgi:application
+```
+
+If the Render Root Directory is instead the repository root, set it to `apex_backend` in the service settings or adapt paths consistently. Apply the migrations before serving the revised API and reward-cycle schema.
 
 Set these in the hosting platform's protected environment-variable UI, not in Git:
 
