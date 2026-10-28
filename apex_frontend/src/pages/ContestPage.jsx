@@ -76,6 +76,7 @@ export default function ContestPage() {
   const [loading, setLoading] = useState(true)
   const [activeAssessment, setActiveAssessment] = useState(null)
   const [activeAttempt, setActiveAttempt] = useState(null)
+  const [openingAssessmentId, setOpeningAssessmentId] = useState('')
   const [answers, setAnswers] = useState({})
   const [reasoning, setReasoning] = useState({})
   const [paymentForm, setPaymentForm] = useState({ full_name: '' })
@@ -279,6 +280,7 @@ export default function ContestPage() {
   }
 
   const startContest = async (assessment) => {
+    setOpeningAssessmentId(assessment.id)
     setErrors((current) => {
       const next = { ...current }
       delete next.attempt
@@ -291,6 +293,31 @@ export default function ContestPage() {
     } catch (error) {
       setErrors((current) => ({ ...current, attempt: getErrorMessage(error) }))
       await refreshContests()
+    } finally {
+      setOpeningAssessmentId('')
+    }
+  }
+
+  const resumeContest = async (assessment) => {
+    setOpeningAssessmentId(assessment.id)
+    setErrors((current) => {
+      const next = { ...current }
+      delete next.attempt
+      return next
+    })
+    try {
+      // Fetch the authoritative saved attempt before opening it; the list card can be stale.
+      const { data } = await startMainContestAssessment(assessment.id)
+      if (data.status !== 'in_progress') {
+        await refreshContests()
+        return
+      }
+      openAttempt(assessment, data)
+    } catch (error) {
+      setErrors((current) => ({ ...current, attempt: getErrorMessage(error) }))
+      await refreshContests()
+    } finally {
+      setOpeningAssessmentId('')
     }
   }
 
@@ -440,14 +467,14 @@ export default function ContestPage() {
         <p className="contest-cycle-disclaimer">Provisional Friday–Sunday standing only; it is not a finalized four-week Merit cycle or a promise of an award or payout.</p>
       </div>
       {errors.attempt && <div className="alert alert-error" role="alert">{errors.attempt}</div>}
-      {errors.contests ? <ErrorState message={errors.contests} retry={refreshContests} /> : loading ? <Loading label="Loading published assessments and results…" /> : contests.length === 0 ? <Empty title="No published assessments or previous results">There are no published main-contest assessments for verified fields or previous attempts on this account.</Empty> : <div className="content-grid contest-card-grid">{contests.map((assessment) => <ContestCard key={assessment.id} assessment={assessment} onStart={startContest} onResume={openAttempt} />)}</div>}
+      {errors.contests ? <ErrorState message={errors.contests} retry={refreshContests} /> : loading ? <Loading label="Loading published assessments and results…" /> : contests.length === 0 ? <Empty title="No published assessments or previous results">There are no published main-contest assessments for verified fields or previous attempts on this account.</Empty> : <div className="content-grid contest-card-grid">{contests.map((assessment) => <ContestCard key={assessment.id} assessment={assessment} onStart={startContest} onResume={resumeContest} opening={openingAssessmentId === assessment.id} />)}</div>}
     </section>}
 
     {user?.is_admin && <AdminPaymentReviews payments={adminPayments} loading={loading} error={errors.adminPayments || errors.adminDecision} onRetry={load} onReview={reviewPayment} busyId={reviewBusy} />}
   </Page>
 }
 
-function ContestCard({ assessment, onStart, onResume }) {
+function ContestCard({ assessment, onStart, onResume, opening }) {
   const attempt = assessment.attempt
   const submitted = attempt?.status === 'graded'
   const inProgress = attempt?.status === 'in_progress'
@@ -457,7 +484,7 @@ function ContestCard({ assessment, onStart, onResume }) {
     <div className="contest-facts"><span>5 minutes maximum</span><span>{assessment.can_start ? `Window closes ${formatDate(assessment.window_closes_at)}` : `Next opening ${formatDate(assessment.next_opening_at)}`}</span></div>
     {submitted && <div className="contest-result"><span>Server result</span><strong>{attempt.score ?? '—'}%</strong><small>{attempt.is_flagged ? 'Flagged for review' : 'Submitted'} · {formatDate(attempt.submitted_at)}</small></div>}
     {attempt && !inProgress && !submitted && <div className="contest-expired">Attempt status: {attempt.status?.replaceAll('_', ' ') || 'unavailable'}. This attempt cannot be restarted.</div>}
-    {inProgress ? <button className="button button-primary" disabled={!assessment.can_start} onClick={() => onResume(assessment, attempt)}>Resume attempt <span>↗</span></button> : !attempt && <button className="button button-primary" disabled={!assessment.can_start} onClick={() => onStart(assessment)}>{assessment.can_start ? 'Start assessment' : 'Opens Friday' } <span>↗</span></button>}
+    {inProgress ? <button className="button button-primary" disabled={opening} onClick={() => onResume(assessment)}>{opening ? 'Opening saved attempt…' : 'Resume attempt'} <span>↗</span></button> : !attempt && <button className="button button-primary" disabled={!assessment.can_start || opening} onClick={() => onStart(assessment)}>{opening ? 'Opening assessment…' : assessment.can_start ? 'Start assessment' : 'Opens Friday' } <span>↗</span></button>}
   </article>
 }
 
