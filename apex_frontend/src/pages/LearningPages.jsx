@@ -472,6 +472,33 @@ export function SponsoredView() {
   }, [filters, isAdmin])
   useEffect(() => { load() }, [load])
 
+  const hasPendingStudentPayment = payments.some((payment) => payment.status === 'pending')
+  useEffect(() => {
+    if (!hasPendingStudentPayment) return undefined
+    let active = true
+    const refreshAccess = async () => {
+      try {
+        const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value))
+        const [{ data }, paymentResponse] = await Promise.all([
+          api.get('/cohorts/sponsored-view/assessments/', { params }),
+          api.get('/cohorts/sponsored-view/payments/'),
+        ])
+        if (!active) return
+        setAssessments(data.results || [])
+        setPayments(unwrapList(paymentResponse.data))
+      } catch {
+        // Keep the pending state visible; the next poll or focus refresh can retry.
+      }
+    }
+    const timer = window.setInterval(refreshAccess, 10000)
+    window.addEventListener('focus', refreshAccess)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshAccess)
+    }
+  }, [filters, hasPendingStudentPayment])
+
   useEffect(() => {
     if (!attempt?.deadline_at || !attempt?.server_time || attempt.status !== 'in_progress') {
       setRemaining(null)
@@ -644,11 +671,13 @@ export function SponsoredView() {
         {payment?.status === 'verified' && <button className="button button-primary" disabled={busy || (!assessment.can_start && payment.attempt?.status !== 'in_progress')} onClick={() => beginAttempt(payment.id)}>{assessment.can_start ? payment.attempt?.status === 'in_progress' ? 'Resume assessment' : payment.attempt ? 'View result' : 'Start assessment' : payment.attempt?.status === 'in_progress' ? 'Resume / finalize attempt' : 'Available Monday–Thursday'}</button>}
         {pendingPayment && <p role="status">Payment is awaiting administrator verification. Your library access will appear here as soon as it is verified.</p>}
         {capabilityAtLimit && !pendingPayment && <p className="assessment-lock-notice" role="status">You have reached the maximum of five active entries for {assessment.field}. You can continue participating in other capabilities.</p>}
-        {canRequestAnother && <form className="form-stack" onSubmit={(event) => { event.preventDefault(); requestPayment(assessment) }}>
-              <p>Pay KSh 20 to the company M-Pesa Till 1598106, then submit the transaction reference. An admin checks the incoming Till payment and confirms it before access is granted.</p>
-              <label>M-Pesa payment reference<input required maxLength={255} autoComplete="off" value={paymentReferences[assessment.id] || ''} onChange={(event) => setPaymentReferences((current) => ({ ...current, [assessment.id]: event.target.value }))} /></label>
-              <button className="button button-primary" type="submit" disabled={busy || !assessment.window_closes_at}>{assessment.window_closes_at ? 'Submit payment for verification' : 'Payment access Monday–Thursday'}</button>
-            </form>}
+        {canRequestAnother && <div className="contest-payment-in-card">
+          <form className="contest-card-payment-form" onSubmit={(event) => { event.preventDefault(); requestPayment(assessment) }}>
+            <div className="contest-payment-instructions"><strong>Pay KSh 20 to the official Apex Till.</strong><span>Use Till number 1598106. An admin checks the transaction and verifies access to this Sponsored View assessment.</span></div>
+            <label>M-Pesa transaction reference<input required minLength={5} maxLength={255} autoComplete="off" value={paymentReferences[assessment.id] || ''} onChange={(event) => setPaymentReferences((current) => ({ ...current, [assessment.id]: event.target.value }))} /></label>
+            <button className="button button-primary" type="submit" disabled={busy || !assessment.window_closes_at}>{busy ? 'Submitting…' : assessment.window_closes_at ? 'Submit payment reference' : 'Payment access Monday–Thursday'}</button>
+          </form>
+        </div>}
       </article>
     })}</div>}
     {attempt && <section className="panel sponsored-attempt" aria-labelledby="sponsored-attempt-title">

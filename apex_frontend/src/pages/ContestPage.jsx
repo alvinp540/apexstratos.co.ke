@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import Page from '../components/Page'
 import { Empty, ErrorState, Loading } from '../components/States'
 import WeeklyScheduleNotice from '../components/WeeklyScheduleNotice'
@@ -79,8 +78,9 @@ export default function ContestPage() {
   const [activeAttempt, setActiveAttempt] = useState(null)
   const [answers, setAnswers] = useState({})
   const [reasoning, setReasoning] = useState({})
-  const [paymentForm, setPaymentForm] = useState({ full_name: '', field: '', payment_reference: '' })
-  const [paymentSubmitted, setPaymentSubmitted] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({ full_name: '' })
+  const [paymentReferences, setPaymentReferences] = useState({})
+  const [paymentFeedback, setPaymentFeedback] = useState({})
   const [paymentBusy, setPaymentBusy] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [reviewBusy, setReviewBusy] = useState('')
@@ -154,6 +154,40 @@ export default function ContestPage() {
   }, [libraryFilters.field, libraryFilters.week, libraryFilters.topic])
 
   useEffect(() => { loadLibrary() }, [loadLibrary])
+
+  const hasPendingContestPayment = payments.some((payment) => ['pending', 'under_review'].includes(payment.status))
+  useEffect(() => {
+    if (!hasPendingContestPayment) return undefined
+    let active = true
+    const refreshPaymentAccess = async () => {
+      try {
+        const params = Object.fromEntries(
+          Object.entries({
+            field: libraryFilters.field,
+            week: libraryFilters.week,
+            topic: libraryFilters.topic,
+          }).filter(([, value]) => value),
+        )
+        const [{ data: paymentData }, { data: libraryData }] = await Promise.all([
+          getMainContestPayments(),
+          getMainContestLibrary(params),
+        ])
+        if (!active) return
+        setPayments(unwrapList(paymentData))
+        setLibraryItems(unwrapList(libraryData))
+        setLibraryCount(libraryData?.count ?? unwrapList(libraryData).length)
+      } catch {
+        // Preserve the current review status; the next poll or focus refresh can retry.
+      }
+    }
+    const timer = window.setInterval(refreshPaymentAccess, 10000)
+    window.addEventListener('focus', refreshPaymentAccess)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshPaymentAccess)
+    }
+  }, [hasPendingContestPayment, libraryFilters.field, libraryFilters.week, libraryFilters.topic])
 
   const refreshContests = useCallback(async () => {
     try {
@@ -278,29 +312,31 @@ export default function ContestPage() {
     }
   }
 
-  const submitPayment = async (event) => {
+  const submitPayment = async (event, assessment) => {
     event.preventDefault()
-    setPaymentSubmitted(false)
-    setErrors((current) => {
-      const next = { ...current }
-      delete next.paymentSubmit
-      return next
-    })
+    const reference = (paymentReferences[assessment.id] || '').trim()
+    setPaymentFeedback((current) => ({ ...current, [assessment.id]: null }))
     setPaymentBusy(true)
     try {
       const phone = user?.phone_number || profile?.phone_number || ''
       await submitMainContestPayment({
-        full_name: paymentForm.full_name.trim(),
+        full_name: (profile?.full_name || paymentForm.full_name).trim(),
         phone_number: phone,
-        field: paymentForm.field,
+        field: assessment.field,
         program: 'main_contest',
         amount_kes: 20,
-        payment_reference: paymentForm.payment_reference.trim(),
+        payment_reference: reference,
       })
-      setPaymentSubmitted(true)
-      setPaymentForm((current) => ({ ...current, payment_reference: '' }))
+      setPaymentFeedback((current) => ({
+        ...current,
+        [assessment.id]: { success: 'Payment reference submitted. It is pending administrator review.' },
+      }))
+      setPaymentReferences((current) => ({ ...current, [assessment.id]: '' }))
     } catch (error) {
-      setErrors((current) => ({ ...current, paymentSubmit: getErrorMessage(error) }))
+      setPaymentFeedback((current) => ({
+        ...current,
+        [assessment.id]: { error: getErrorMessage(error) },
+      }))
       setPaymentBusy(false)
       return
     }
@@ -361,41 +397,36 @@ export default function ContestPage() {
       <div className="filter-row"><label>Study area<select value={libraryFilters.field} onChange={(event) => setLibraryFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All study areas</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label><label>Week<select value={libraryFilters.week} onChange={(event) => setLibraryFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={libraryFilters.topic} onChange={(event) => setLibraryFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label><button className="button button-quiet" onClick={loadLibrary}>↻ Refresh library</button></div>
       {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <div className="content-grid">{libraryItems.map((assessment) => {
         const locked = !assessment.has_verified_access && assessment.attempt?.status !== 'in_progress' && assessment.attempt?.status !== 'graded'
+        const fieldPayments = payments.filter((payment) => payment.field === assessment.field)
+        const latestPayment = fieldPayments[0]
+        const hasPendingPayment = fieldPayments.some((payment) => ['pending', 'under_review'].includes(payment.status))
         return <article className="tutorial-card" key={assessment.id}>
           <div className="tutorial-card-top"><span className="tag">{assessment.field}</span><span className="tag">Week {assessment.week}</span></div>
           <div className={`assessment-preview${locked ? ' assessment-preview-locked' : ''}`} aria-hidden={locked || undefined}>
             <h3>{assessment.title}</h3><p>{assessment.description}</p>
             <ContestSponsorships sponsorships={assessment.sponsorships} />
           </div>
-          {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 20 payment is verified for this study area. <a href="#contest-payment-form">Go to payment form.</a></p>}
+          {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 20 payment is verified for this study area. Submit your M-Pesa reference below.</p>}
           <div className="tutorial-meta"><span>10 questions · 5 minutes maximum · KSh {assessment.access_price_kes}</span><span>{assessment.attempt?.status === 'graded' ? `Completed · ${assessment.attempt.score}%` : assessment.attempt?.status === 'timed_out' ? `Timed out · ${assessment.attempt.score ?? 'processing'}%` : assessment.can_start ? 'Available now · EAT' : `Next opening: ${formatDate(assessment.next_opening_at)}`}</span></div>
           {(!assessment.attempt || ['in_progress', 'timed_out'].includes(assessment.attempt.status)) && <button className="button button-primary" disabled={!assessment.can_start && assessment.attempt?.status !== 'in_progress' && assessment.attempt?.status !== 'timed_out'} onClick={() => startContest(assessment)}>{assessment.attempt?.status === 'in_progress' ? 'Resume assessment' : assessment.attempt?.status === 'timed_out' ? 'View finalized result' : assessment.can_start ? 'Start assessment' : locked ? 'Requires verified payment and Friday–Sunday access' : 'Available Friday–Sunday'}</button>}
           {assessment.attempt?.status === 'graded' && assessment.attempt.questions?.length > 0 && <details className="contest-answer-review"><summary>Review answers and explanations</summary><ol>{assessment.attempt.questions.map((question) => <li key={question.id}><strong>{question.prompt}</strong><p>Your answer: {question.selected_answer || 'No answer submitted'}</p><p>Correct answer: {question.correct_answer}</p><p>{question.rationale}</p></li>)}</ol></details>}
+          <div className="contest-payment-in-card">
+            {latestPayment && <p className="contest-status">{latestPayment.field} payment: {latestPayment.status.replaceAll('_', ' ')} · ref {latestPayment.payment_reference}{latestPayment.rejection_reason ? ` · ${latestPayment.rejection_reason}` : ''}</p>}
+            {errors.payments && <ErrorState message={errors.payments} retry={load} />}
+            {paymentFeedback[assessment.id]?.error && <div className="alert alert-error" role="alert">{paymentFeedback[assessment.id].error}</div>}
+            {paymentFeedback[assessment.id]?.success && <div className="alert alert-success" role="status">{paymentFeedback[assessment.id].success}</div>}
+            {locked && hasPendingPayment && <p role="status">Your payment reference is awaiting admin review. You can start after it is verified.</p>}
+            {locked && !hasPendingPayment && <form className="contest-card-payment-form" onSubmit={(event) => submitPayment(event, assessment)}>
+              <div className="contest-payment-instructions"><strong>Pay KSh 20 to the official Apex Till.</strong><span>Use Till number 1598106 for {assessment.field}. An admin checks the transaction and verifies access.</span></div>
+              {profile?.full_name ? <p>Your payment will use the name on your profile: <strong>{profile.full_name}</strong></p> : <label>Full name on your Apex profile<input value={paymentForm.full_name} onChange={(event) => setPaymentForm({ full_name: event.target.value })} required autoComplete="name" /></label>}
+              <p className="contest-help">Registered phone: {phone || 'Add a phone number to your profile before paying.'}</p>
+              <label>M-Pesa transaction reference<input value={paymentReferences[assessment.id] || ''} onChange={(event) => setPaymentReferences((current) => ({ ...current, [assessment.id]: event.target.value }))} required minLength={5} maxLength={255} autoComplete="off" /></label>
+              <button className="button button-primary" type="submit" disabled={paymentBusy || !phone}>{paymentBusy ? 'Submitting…' : 'Submit payment reference'}</button>
+            </form>}
+          </div>
         </article>
       })}</div>}
     </section>
-    <section className="panel contest-payment-panel">
-      <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST ACCESS</div><h2>Payment review</h2><p>Submit your KSh 20 M-Pesa reference for the official study area you want to enter. Payment is reviewed by an administrator and does not add merit.</p></div><span className="contest-price">KES 20</span></div>
-      {errors.profile && <div className="alert alert-error" role="alert">Profile details could not be loaded. Your registered phone and name will be validated by the server when you submit.</div>}
-      {errors.payments && <ErrorState message={errors.payments} retry={load} />}
-      <div className="contest-payment-layout">
-        <form id="contest-payment-form" className="contest-payment-form" onSubmit={submitPayment}>
-          {errors.paymentSubmit && <div className="alert alert-error" role="alert">{errors.paymentSubmit}</div>}
-          {paymentSubmitted && <div className="alert alert-success" role="status">Payment reference submitted. It will remain pending until reviewed by an administrator.</div>}
-          <label>Full name on your Apex profile<input value={paymentForm.full_name} onChange={(event) => setPaymentForm({ ...paymentForm, full_name: event.target.value })} required autoComplete="name" /></label>
-          <label>Registered phone number<input value={phone} readOnly aria-describedby="contest-phone-note" placeholder="Add a phone number to your profile first" /></label>
-          <small id="contest-phone-note" className="contest-help">{phone ? 'This number is sent as registered and cannot be changed here.' : <>Add a phone number to your <Link to="/profile">profile</Link> before submitting payment.</>}</small>
-          <label>Official study area<select value={paymentForm.field} onChange={(event) => setPaymentForm({ ...paymentForm, field: event.target.value })} required><option value="">Choose a study area</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label>
-          <label>M-Pesa transaction reference<input value={paymentForm.payment_reference} onChange={(event) => setPaymentForm({ ...paymentForm, payment_reference: event.target.value })} required minLength={5} autoComplete="off" /></label>
-          <div className="contest-payment-instructions"><strong>Pay KSh 20 to the official Apex Till.</strong><span>Use Till number 1598106. Keep your transaction confirmation; an admin verifies the reference before the platform makes contest assessments available.</span></div>
-          <button className="button button-primary" disabled={paymentBusy || !phone}>{paymentBusy ? 'Submitting…' : 'Submit payment reference'} <span>↗</span></button>
-        </form>
-        <div className="contest-payment-status"><div className="panel-heading"><h3>Your payment requests</h3>{!loading && <button className="text-button" onClick={load}>↻ Refresh</button>}</div>
-          {loading ? <Loading label="Loading payment requests…" /> : errors.payments ? null : payments.length === 0 ? <Empty title="No payment requests yet">Submitted references and their review status will appear here.</Empty> : <div className="contest-payment-list">{payments.map((payment) => <article className="contest-payment-item" key={payment.id}><div><strong>{payment.field}</strong><span>{payment.payment_reference || 'Reference not listed'} · KES {payment.amount_kes}</span><small>Submitted {formatDate(payment.created_at)}</small></div><span className={`contest-status status-${payment.status}`}>{payment.status?.replaceAll('_', ' ') || 'status unavailable'}</span>{payment.rejection_reason && <p>{payment.rejection_reason}</p>}</article>)}</div>}
-        </div>
-      </div>
-    </section>
-
     {activeAttempt && activeAssessment ? <ContestAttempt assessment={activeAssessment} attempt={activeAttempt} answers={answers} reasoning={reasoning} onAnswer={(questionId, answer) => updateAnswers({ ...answersRef.current, [questionId]: answer })} onReasoning={(questionId, text) => updateReasoning({ ...reasoningRef.current, [questionId]: text })} onSubmit={submitAnswers} onExit={closeAttempt} onExpireRetry={expireAttempt} timer={timer} submitting={submitting} error={errors.attempt} /> : <section className="contest-assessment-section">
       <div className="contest-section-heading"><div><div className="eyebrow">ASSESSMENT WINDOW</div><h2>Contest assessments and results</h2><p>Published assessments and previous results remain visible. New attempts can only start Friday through Sunday EAT after field-specific payment verification.</p></div><button className="button button-quiet" onClick={refreshContests}>↻ Refresh</button></div>
       <div className="contest-cycle-standing" aria-live="polite">
