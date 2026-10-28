@@ -112,6 +112,7 @@ Set these in the hosting platform's protected environment-variable UI, not in Gi
 - `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`: legacy MySQL connection settings.
 - `REDIS_URL`: production Redis URL if the deployed Channels/Celery features require Redis.
 - `FRONTEND_URL`: production frontend base URL.
+- `MAIN_CONTEST_TIME_LIMIT_ENABLED`: defaults to `True`. For a temporary Main Contest access diagnostic, set it to `False` on Render and redeploy. This disables backend deadline enforcement and the React timer but keeps payment checks and the Friday–Sunday start window. Restore it to `True` or remove it after the diagnostic, then redeploy to restore the five-minute limit.
 - `APEX_VERSION`, `GIT_COMMIT`: release label and exact deployed commit.
 - Provider/storage/email values as required: `CLOUDINARY_*`, `STRIPE_*`, `MPESA_*`, `EMAIL_*`.
 

@@ -2,6 +2,7 @@ import json
 from collections import defaultdict
 from datetime import datetime, time, timedelta
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -83,10 +84,11 @@ def _snapshot(assessment):
 
 def _attempt_response(attempt):
     now = timezone.now()
+    time_limit_enabled = settings.MAIN_CONTEST_TIME_LIMIT_ENABLED
     remaining = max(
         0,
         int((attempt.deadline_at - now).total_seconds()),
-    ) if attempt.deadline_at else 0
+    ) if time_limit_enabled and attempt.deadline_at else None
     snapshot = attempt.assessment_snapshot
     answers = {}
     reasoning = {}
@@ -114,7 +116,7 @@ def _attempt_response(attempt):
         for question in snapshot.get('questions', [])
     ]
     attempt_status = attempt.status
-    if attempt_status == 'in_progress' and attempt.deadline_at and now >= attempt.deadline_at:
+    if time_limit_enabled and attempt_status == 'in_progress' and attempt.deadline_at and now >= attempt.deadline_at:
         attempt_status = 'timed_out'
     return {
         'id': str(attempt.id),
@@ -128,9 +130,10 @@ def _attempt_response(attempt):
         'status': attempt_status,
         'score': attempt.score,
         'started_at': attempt.started_at,
-        'deadline_at': attempt.deadline_at,
+        'deadline_at': attempt.deadline_at if time_limit_enabled else None,
         'server_time': now,
         'time_remaining': remaining,
+        'time_limit_enabled': time_limit_enabled,
         'is_flagged': attempt.is_flagged,
     }
 
@@ -577,7 +580,7 @@ class StartContestAssessmentView(APIView):
                 user=request.user, assessment=assessment,
             ).first()
             if existing_attempt:
-                if existing_attempt.status == 'in_progress' and (
+                if settings.MAIN_CONTEST_TIME_LIMIT_ENABLED and existing_attempt.status == 'in_progress' and (
                     not existing_attempt.deadline_at or now >= existing_attempt.deadline_at
                 ):
                     _finalize_contest_timeout(existing_attempt, now)
@@ -620,10 +623,14 @@ class StartContestAssessmentView(APIView):
                 },
             )
             if created:
-                attempt.deadline_at = weekly_attempt_deadline(
-                    'main_contest',
-                    attempt.started_at,
-                    attempt.duration_seconds,
+                attempt.deadline_at = (
+                    weekly_attempt_deadline(
+                        'main_contest',
+                        attempt.started_at,
+                        attempt.duration_seconds,
+                    )
+                    if settings.MAIN_CONTEST_TIME_LIMIT_ENABLED
+                    else None
                 )
                 attempt.save(update_fields=('deadline_at',))
             elif attempt.status != 'in_progress':
@@ -633,7 +640,7 @@ class StartContestAssessmentView(APIView):
                     {'error': 'This attempt has no preserved assessment version and cannot be safely resumed.'},
                     status=status.HTTP_409_CONFLICT,
                 )
-            elif not attempt.deadline_at or now >= attempt.deadline_at:
+            elif settings.MAIN_CONTEST_TIME_LIMIT_ENABLED and (not attempt.deadline_at or now >= attempt.deadline_at):
                 _finalize_contest_timeout(attempt, now)
         return Response(_attempt_response(attempt), status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
@@ -654,7 +661,7 @@ class SaveContestAttemptAnswersView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             now = timezone.now()
-            if not attempt.deadline_at or now >= attempt.deadline_at:
+            if settings.MAIN_CONTEST_TIME_LIMIT_ENABLED and (not attempt.deadline_at or now >= attempt.deadline_at):
                 _finalize_contest_timeout(attempt, now)
                 return Response(_attempt_response(attempt))
             answers = request.data.get('answers', {})
@@ -724,7 +731,7 @@ class SubmitContestAssessmentView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
             now = timezone.now()
-            if not attempt.deadline_at or now >= attempt.deadline_at:
+            if settings.MAIN_CONTEST_TIME_LIMIT_ENABLED and (not attempt.deadline_at or now >= attempt.deadline_at):
                 _finalize_contest_timeout(attempt, now)
                 return Response({
                     'attempt_id': str(attempt.id), 'status': attempt.status,

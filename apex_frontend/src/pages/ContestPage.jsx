@@ -32,7 +32,7 @@ function contestDay(value) {
 function useContestCountdown(attempt, onExpire) {
   const [remaining, setRemaining] = useState(null)
   useEffect(() => {
-    if (!attempt?.id) {
+    if (!attempt?.id || attempt.time_limit_enabled === false) {
       setRemaining(null)
       return undefined
     }
@@ -55,7 +55,8 @@ function useContestCountdown(attempt, onExpire) {
     update()
     const timer = window.setInterval(update, 1000)
     return () => window.clearInterval(timer)
-  }, [attempt?.id, attempt?.deadline_at, attempt?.server_time, onExpire])
+  }, [attempt?.id, attempt?.deadline_at, attempt?.server_time, attempt?.time_limit_enabled, onExpire])
+  if (attempt?.time_limit_enabled === false) return 'NO LIMIT'
   if (remaining === null) return '—'
   return `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`
 }
@@ -262,7 +263,7 @@ export default function ContestPage() {
   }, [activeAttemptId, activeAttemptStatus, answers, reasoning, submitting])
 
   const openAttempt = (assessment, attempt) => {
-    if (!attempt?.id || !attempt.deadline_at || !attempt.server_time) {
+    if (!attempt?.id || (attempt.time_limit_enabled !== false && (!attempt.deadline_at || !attempt.server_time))) {
       setErrors((current) => ({ ...current, attempt: 'The server did not return a usable attempt deadline. Reload the contest list before continuing.' }))
       return
     }
@@ -504,7 +505,7 @@ function ContestAttempt({ assessment, attempt, answers, reasoning, onAnswer, onR
     : null
   const missingReasoning = attempt.questions?.some((question) => question.requires_reasoning && !reasoning[question.id]?.trim())
   return <section className="panel contest-attempt">
-    <div className="contest-attempt-heading"><div><div className="eyebrow">{assessment.field} · LIVE ATTEMPT</div><h2>{attempt.title || assessment.title}</h2><p>{attempt.description || assessment.description}</p><ContestSponsorships sponsorships={assessment.sponsorships} /></div><div className={`contest-timer${expired ? ' timer-expired' : ''}`}><small>SERVER DEADLINE</small><strong>{timer}</strong><span>{formatDate(attempt.deadline_at)}</span></div></div>
+    <div className="contest-attempt-heading"><div><div className="eyebrow">{assessment.field} · LIVE ATTEMPT</div><h2>{attempt.title || assessment.title}</h2><p>{attempt.description || assessment.description}</p><ContestSponsorships sponsorships={assessment.sponsorships} /></div><div className={`contest-timer${expired ? ' timer-expired' : ''}`}><small>{timer === 'NO LIMIT' ? 'TEST MODE' : 'SERVER DEADLINE'}</small><strong>{timer}</strong><span>{timer === 'NO LIMIT' ? 'Time limit disabled for testing' : formatDate(attempt.deadline_at)}</span></div></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {deadlineUnavailable && <div className="alert alert-error" role="alert">A server deadline was not provided, so this attempt cannot be answered safely. Reload the contest list or contact support.</div>}
     {remainingSeconds !== null && remainingSeconds <= 60 && remainingSeconds > 30 && <div role="status" className="contest-expired">One minute remaining.</div>}

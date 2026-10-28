@@ -44,6 +44,10 @@ def env_list(name, default=""):
 
 
 DEBUG = env_bool("DEBUG", default=not IS_VERCEL)
+MAIN_CONTEST_TIME_LIMIT_ENABLED = env_bool(
+    "MAIN_CONTEST_TIME_LIMIT_ENABLED",
+    default=True,
+)
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "").strip()
 
