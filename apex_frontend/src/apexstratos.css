@@ -107,6 +107,25 @@ body {
   color: var(--lime-dim);
 }
 
+.landing-menu-action {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.landing-menu-action:hover {
+  background: var(--panel);
+  color: var(--lime-dim);
+}
+
 .hero {
   grid-template-columns: minmax(0, 1.15fr) minmax(270px, 0.85fr);
   gap: clamp(28px, 6vw, 90px);
@@ -538,6 +557,10 @@ body {
 @media (max-width: 760px) {
   .landing-menu {
     display: block;
+  }
+
+  .landing-nav .landing-signout {
+    display: none;
   }
 
   .hero {

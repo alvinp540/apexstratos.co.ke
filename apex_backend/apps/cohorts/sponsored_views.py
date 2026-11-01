@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
@@ -21,7 +23,7 @@ from .models import (
     SponsoredViewSettlementAdjustment,
     SponsoredViewPayment,
 )
-from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, EAT, activity_window, attempt_deadline, next_opening
+from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, EAT, activity_window, next_opening
 
 
 class SponsoredViewPaymentInputSerializer(serializers.Serializer):
@@ -228,7 +230,7 @@ class SponsoredViewAssessmentListView(APIView):
                 'active_entries_for_capability': active_counts.get(assessment.field, 0),
                 'active_entry_limit': 5,
                 'has_verified_access': bool(verified_payment),
-                'can_start': bool(window and verified_payment),
+                'can_start': bool(verified_payment),
                 'reward_cycle': _current_reward_cycle_summary(assessment),
                 'window_closes_at': window[1] if window else None,
                 'next_opening_at': None if window else next_opening('sponsored_view', now),
@@ -579,12 +581,6 @@ class StartSponsoredViewAttemptView(APIView):
                 if attempt.status == 'in_progress' and now >= attempt.deadline_at:
                     _finalize_sponsored_view_timeout(attempt, now)
                 return Response(_attempt_response(attempt))
-            window = activity_window('sponsored_view', now)
-            if window is None:
-                return Response(
-                    {'error': 'Sponsored View assessments are available Monday through Thursday in EAT.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
             if payment.status != 'verified':
                 return Response(
                     {'error': 'A verified KSh 20 payment is required before starting this assessment.'},
@@ -614,11 +610,7 @@ class StartSponsoredViewAttemptView(APIView):
                     for question in questions
                 ],
                 started_at=started_at,
-                deadline_at=attempt_deadline(
-                    'sponsored_view',
-                    started_at,
-                    ASSESSMENT_DURATION_SECONDS,
-                ),
+                deadline_at=started_at + timedelta(seconds=ASSESSMENT_DURATION_SECONDS),
             )
         return Response(_attempt_response(attempt), status=status.HTTP_201_CREATED)
 

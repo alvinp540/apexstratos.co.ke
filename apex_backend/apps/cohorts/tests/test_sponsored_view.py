@@ -191,6 +191,43 @@ class SponsoredViewAccessTests(TestCase):
         self.assertIn('correct_answer', submitted.data['questions'][0])
         self.assertEqual(SponsoredViewAttempt.objects.count(), 1)
 
+    def test_verified_payment_can_start_after_payment_window_closes(self):
+        monday = eat_datetime(2026, 10, 12, 10)
+        payment = self.create_payment('SPONSOREDREFAFTERWINDOW', now=monday)
+        self.assertEqual(payment.status_code, 201)
+
+        friday = eat_datetime(2026, 10, 16, 10)
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=friday):
+            pending_start = self.client.post(
+                reverse('sponsored-view-attempt-start', kwargs={'payment_id': payment.data['id']}),
+                {},
+                format='json',
+            )
+        self.assertEqual(pending_start.status_code, 403)
+
+        self.client.force_authenticate(self.admin)
+        verified = self.client.post(
+            reverse('sponsored-view-payment-admin-decision', kwargs={'payment_id': payment.data['id']}),
+            {
+                'status': 'verified',
+                'mpesa_transaction_id': 'SPONSOREDTXAFTERWINDOW',
+            },
+            format='json',
+        )
+        self.assertEqual(verified.status_code, 200)
+        self.client.force_authenticate(self.student)
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=friday):
+            catalog = self.client.get(reverse('sponsored-view-assessment-list'))
+            started = self.client.post(
+                reverse('sponsored-view-attempt-start', kwargs={'payment_id': payment.data['id']}),
+                {},
+                format='json',
+            )
+        self.assertTrue(catalog.data['results'][0]['has_verified_access'])
+        self.assertTrue(catalog.data['results'][0]['can_start'])
+        self.assertEqual(started.status_code, 201)
+        self.assertEqual(started.data['deadline_at'], friday + timedelta(minutes=5))
+
     def test_timeout_grades_only_saved_answers_and_repeated_finalize_is_idempotent(self):
         monday = eat_datetime(2026, 10, 12, 10)
         payment = self.create_payment('SPONSORED_TIMEOUT', now=monday)

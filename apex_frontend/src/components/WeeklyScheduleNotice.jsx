@@ -22,7 +22,7 @@ function formatEAT(value) {
     })
 }
 
-export default function WeeklyScheduleNotice({ activity }) {
+export default function WeeklyScheduleNotice({ activity, hasVerifiedAccess = false }) {
   const [schedule, setSchedule] = useState(null)
   const [error, setError] = useState('')
   useEffect(() => {
@@ -38,6 +38,8 @@ export default function WeeklyScheduleNotice({ activity }) {
     <span>i</span>
     <p>{error || !state
       ? error || 'Checking the weekly schedule…'
+      : activity === 'sponsored_view' && hasVerifiedAccess
+        ? 'Your Sponsored View payment is verified. Start or resume this paid assessment at any time; new payment requests are accepted Monday–Thursday EAT.'
       : !state.implemented
         ? `${labels[activity]} follow a Monday–Thursday EAT window, but starting is not enabled because the backend assessment and attempt feature is not implemented. ${state.available_now ? `The schedule window closes ${formatEAT(state.closes_at)}.` : `Next opening: ${formatEAT(state.opens_at)}.`}`
       : state.available_now
