@@ -22,7 +22,7 @@ export default function Shell() {
         </div>
       </aside>
       <main className="main-area">
-        <header className="topbar"><div className="crumb">APEXSTRATOS <span>/</span> {title.toUpperCase()}</div><div className="top-actions"><span className="live-dot" /> <span className="secure-label">YOUR SPACE</span><Link className="top-avatar" to="/profile" aria-label="Your profile">{(user?.username || 'A')[0].toUpperCase()}</Link><button className="icon-button mobile-signout" title="Sign out" aria-label="Sign out" onClick={logout}>↗</button></div></header>
+        <header className="topbar"><div className="crumb">APEXSTRATOS <span>/</span> {title.toUpperCase()}</div><div className="top-actions"><span className="live-dot" /> <span className="secure-label">YOUR SPACE</span><Link className="top-avatar" to="/profile" aria-label="Your profile">{(user?.username || 'A')[0].toUpperCase()}</Link><button className="button button-quiet" type="button" onClick={logout}>Sign out</button></div></header>
         <div className="mobile-brand"><Link to="/dashboard" className="brand"><span className="brand-symbol">A</span><span>APEXSTRATOS</span></Link><Link to="/notifications" className="icon-button" aria-label="Notifications">◉</Link></div>
         <nav className="mobile-nav" aria-label="Student navigation">{mobileNavItems.map((item) => <NavLink key={item.to} to={item.to} aria-label={item.label} title={item.label}><span aria-hidden="true">{item.icon}</span><small>{item.label}</small></NavLink>)}</nav>
         <div className="content"><Outlet /></div>
