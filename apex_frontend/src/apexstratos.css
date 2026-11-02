@@ -247,6 +247,53 @@ body {
   margin-bottom: 20px;
 }
 
+.sponsored-ranking {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-hi);
+}
+
+.sponsored-ranking-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sponsored-ranking-heading strong {
+  font-size: 11px;
+}
+
+.sponsored-ranking-heading span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.sponsored-ranking table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  text-align: left;
+}
+
+.sponsored-ranking th,
+.sponsored-ranking td {
+  padding: 7px 5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sponsored-ranking th {
+  color: var(--muted);
+  font: 9px var(--mono);
+}
+
+.sponsored-ranking tr:last-child td {
+  border-bottom: 0;
+}
+
 .step-card h3 {
   margin: 15px 0 8px;
   font-size: 15px;

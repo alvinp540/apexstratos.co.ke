@@ -13,6 +13,8 @@ from apps.cohorts.models import (
     SponsoredViewAttempt,
     SponsoredViewPayment,
     SponsoredViewQuestion,
+    SponsoredViewRewardCycle,
+    SponsoredViewRewardCycleEntry,
 )
 from apps.notifications.models import Notification
 
@@ -116,6 +118,76 @@ class SponsoredViewAccessTests(TestCase):
             {'topic': 'interface'},
         )
         self.assertTrue(unlocked.data['results'][0]['has_verified_access'])
+
+    def test_catalog_includes_current_cohort_ranking_without_private_contacts(self):
+        cycle = SponsoredViewRewardCycle.objects.create(
+            assessment=self.assessment,
+            capability=self.assessment.field,
+            cycle_number=2,
+            eligible_completion_count=2,
+        )
+        earlier = eat_datetime(2026, 10, 12, 9)
+        participants = (
+            (self.student, 'Ada', 'Learner', 80, earlier + timedelta(minutes=1)),
+            (
+                User.objects.create_user(
+                    email='sponsored-second@example.test',
+                    username='sponsored-second',
+                    password='test-password',
+                    first_name='Sam',
+                    last_name='Student',
+                ),
+                'Sam',
+                'Student',
+                90,
+                earlier,
+            ),
+        )
+        for index, (participant, first_name, last_name, score, submitted_at) in enumerate(participants):
+            participant.first_name = first_name
+            participant.last_name = last_name
+            participant.save(update_fields=('first_name', 'last_name'))
+            payment = SponsoredViewPayment.objects.create(
+                user=participant,
+                assessment=self.assessment,
+                payment_reference=f'SPONSORED-RANK-REF-{index}',
+                mpesa_transaction_id=f'SPONSORED-RANK-TX-{index}',
+                status='verified',
+                verified_by=self.admin,
+                verified_at=submitted_at,
+            )
+            attempt = SponsoredViewAttempt.objects.create(
+                payment=payment,
+                user=participant,
+                assessment=self.assessment,
+                status='graded',
+                score=score,
+                deadline_at=submitted_at + timedelta(minutes=5),
+                submitted_at=submitted_at,
+            )
+            SponsoredViewRewardCycleEntry.objects.create(
+                cycle=cycle,
+                payment=payment,
+                attempt=attempt,
+                user=participant,
+                score=score,
+                submitted_at=submitted_at,
+            )
+
+        response = self.client.get(reverse('sponsored-view-assessment-list'))
+
+        self.assertEqual(response.status_code, 200)
+        reward_cycle = response.data['results'][0]['reward_cycle']
+        self.assertEqual(reward_cycle['cycle_number'], 2)
+        self.assertEqual(
+            reward_cycle['ranking'],
+            [
+                {'rank': 1, 'display_name': 'Sam Student', 'score': 90},
+                {'rank': 2, 'display_name': 'Ada Learner', 'score': 80},
+            ],
+        )
+        self.assertNotIn('email', reward_cycle['ranking'][0])
+        self.assertNotIn('phone_number', reward_cycle['ranking'][0])
 
     def test_student_pays_once_admin_verifies_then_student_starts_saves_and_submits(self):
         monday = eat_datetime(2026, 10, 12, 10)

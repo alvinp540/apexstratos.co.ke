@@ -674,6 +674,20 @@ export function SponsoredView() {
         <div className="tutorial-meta"><span>{assessment.question_count} questions</span><span>KSh {assessment.access_price_kes} per attempt</span></div>
         <p className="contest-status">{assessment.field} active entries: {assessment.active_entries_for_capability}/{assessment.active_entry_limit}</p>
         <p className="contest-status">Reward cycle {assessment.reward_cycle?.cycle_number}: {assessment.reward_cycle?.eligible_completion_count}/{assessment.reward_cycle?.target_completion_count} eligible completions · {assessment.reward_cycle?.status?.replaceAll('_', ' ')}</p>
+        {assessment.reward_cycle?.ranking?.length > 0 && <div className="sponsored-ranking">
+          <div className="sponsored-ranking-heading">
+            <strong>Cohort #{assessment.reward_cycle.cycle_number} ranking</strong>
+            <span>Contacts are private</span>
+          </div>
+          <table>
+            <thead><tr><th scope="col">Rank</th><th scope="col">Participant</th><th scope="col">Score</th></tr></thead>
+            <tbody>{assessment.reward_cycle.ranking.map((participant) => <tr key={`${assessment.reward_cycle.cycle_number}-${participant.rank}-${participant.display_name}`}>
+              <td>#{participant.rank}</td>
+              <td>{participant.display_name}</td>
+              <td>{participant.score}%</td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
         {payment && <p className={`contest-status status-${payment.status}`}>Payment: {payment.status.replaceAll('_', ' ')}{payment.rejection_reason ? ` — ${payment.rejection_reason}` : ''}</p>}
         {assessmentPayments.filter((item) => item.id !== payment?.id).map((otherPayment) => <p key={otherPayment.id}>Another attempt: payment {otherPayment.status.replaceAll('_', ' ')}{otherPayment.attempt?.score != null ? ` · score ${otherPayment.attempt.score}%` : ''}</p>)}
         {payment?.attempt && <p>Attempt: {payment.attempt.status.replaceAll('_', ' ')}{payment.attempt.score != null ? ` · Score ${payment.attempt.score}%` : ''}</p>}

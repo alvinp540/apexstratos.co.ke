@@ -130,13 +130,31 @@ def _current_reward_cycle_summary(assessment):
             'status': 'open',
             'eligible_completion_count': 0,
             'target_completion_count': 10,
+            'ranking': [],
         }
+    entries = cycle.entries.filter(status='eligible').select_related(
+        'user',
+        'user__profile',
+    ).order_by('-score', 'submitted_at', 'user_id')
+    ranking = []
+    for index, entry in enumerate(entries, start=1):
+        profile = getattr(entry.user, 'profile', None)
+        display_name = (
+            profile.full_name.strip() if profile and profile.full_name.strip()
+            else entry.user.get_full_name().strip() or 'Participant'
+        )
+        ranking.append({
+            'rank': index,
+            'display_name': display_name,
+            'score': entry.score,
+        })
     return {
         'id': str(cycle.id),
         'cycle_number': cycle.cycle_number,
         'status': cycle.status,
         'eligible_completion_count': cycle.eligible_completion_count,
         'target_completion_count': cycle.target_completion_count,
+        'ranking': ranking,
     }
 
 
