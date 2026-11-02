@@ -4,6 +4,8 @@ import api, { getErrorMessage, unwrapList } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import Page from '../components/Page'
 import { Empty, ErrorState, Loading, PaginationControls, Unavailable } from '../components/States'
+import MainContestPaymentReviewsPanel from '../components/admin/MainContestPaymentReviewsPanel'
+import SponsoredViewPaymentReviewsPanel from '../components/admin/SponsoredViewPaymentReviewsPanel'
 import AdminAssessmentReview from './AdminAssessmentReview'
 import AdminVendorManagement from './AdminVendorManagement'
 
@@ -151,7 +153,7 @@ export function Admin() {
   const [accountMessage, setAccountMessage] = useState({ error: '', success: '' })
   const [status, setStatus] = useState({ loading: true, error: '' })
   const load = useCallback(async () => {
-    if (tab === 'vendors') return
+    if (!['users', 'fraud'].includes(tab)) return
     setStatus({ loading: true, error: '' })
     try {
       const [userData, logData] = await Promise.all([
@@ -208,9 +210,9 @@ export function Admin() {
   if (!user?.is_admin) return <Page eyebrow="RESTRICTED AREA" title="Admin tools"><Unavailable title="Admin access required">These tools are restricted by the backend. Sign in with an authorized admin account to continue.</Unavailable></Page>
   return <Page eyebrow="PLATFORM OPERATIONS" title="Admin tools" description="Administrative information is fetched from permission-protected Apex endpoints." action={<Link className="button button-quiet" to="/contests#main-contest-payments">Review contest payments <span>↗</span></Link>}>
     <div className="admin-tabs" role="tablist" aria-label="Admin sections">
-      {['assessments', 'vendors', 'users', 'fraud'].map((section) => <button className={`button ${tab === section ? 'button-primary' : 'button-quiet'}`} key={section} type="button" role="tab" aria-selected={tab === section} onClick={() => setTab(section)}>{section === 'fraud' ? 'Fraud review' : section === 'users' ? 'Users' : section === 'vendors' ? 'Vendors & campaigns' : 'Assessment review'}</button>)}
+      {['assessments', 'vendors', 'users', 'fraud', 'payments'].map((section) => <button className={`button ${tab === section ? 'button-primary' : 'button-quiet'}`} key={section} type="button" role="tab" aria-selected={tab === section} onClick={() => setTab(section)}>{section === 'fraud' ? 'Fraud review' : section === 'payments' ? 'Payment review' : section === 'users' ? 'Users' : section === 'vendors' ? 'Vendors & campaigns' : 'Assessment review'}</button>)}
     </div>
-    {tab === 'vendors' ? <AdminVendorManagement /> : tab === 'assessments' ? <AdminAssessmentReview /> : status.loading ? <Loading label="Loading admin records…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : tab === 'users' ?
+    {tab === 'payments' ? <div className="admin-payment-review-panels"><SponsoredViewPaymentReviewsPanel /><MainContestPaymentReviewsPanel /></div> : tab === 'vendors' ? <AdminVendorManagement /> : tab === 'assessments' ? <AdminAssessmentReview /> : status.loading ? <Loading label="Loading admin records…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : tab === 'users' ?
       <div className="admin-account-management">
         <section className="panel">
           <div className="panel-heading"><h2>Create admin account</h2></div>
