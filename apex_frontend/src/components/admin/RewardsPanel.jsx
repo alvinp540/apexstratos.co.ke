@@ -72,7 +72,18 @@ export default function RewardsPanel() {
         {cycle.error_message && <p role="status">{cycle.error_message}</p>}
         {['full', 'failed'].includes(cycle.status) && <button className="button button-quiet" disabled={busy} onClick={() => retryCycles(cycle.id)}>Retry this cycle</button>}
         {cycle.entries?.map((entry) => <p key={entry.attempt_id}>{entry.student} · {entry.email} · KES {cycle.participation_fee_kes} / Till 1598106 · ref {entry.payment_reference} · payment {entry.payment_status} · attempt {entry.attempt_status} · score {entry.score}% · {entry.entry_status}</p>)}
-        {cycle.ranking?.map((item) => <small key={item.user_id}>Rank {item.rank}: {item.user_id} · {item.score}% {item.winner ? '· winner' : ''}</small>)}
+        {cycle.ranking?.length > 0 && <div className="reward-cycle-ranking">
+          <h5>Contestant ranking and M-Pesa numbers</h5>
+          {cycle.ranking.map((item) => {
+            const participant = cycle.entries?.find((entry) => entry.user_id === item.user_id)
+            return <div className="reward-cycle-ranking-row" key={item.user_id}>
+              <strong>#{item.rank}</strong>
+              <span>{participant?.student || 'Contestant'}<small>{item.score}%{item.winner ? ' · winner' : ''}</small></span>
+              <span className="reward-cycle-phone">{participant?.phone_number || 'No registered number'}</span>
+            </div>
+          })}
+          <p>For a pending payout, confirm the registered number with the winner before sending the reward. Record the confirmed M-Pesa reference below after the manual transfer.</p>
+        </div>}
       </article>)}
       <h3>Settlement ledger and historical daily records</h3>
       {settlements.map((row) => <article className="support-programme-card" key={row.id}>

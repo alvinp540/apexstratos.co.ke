@@ -57,6 +57,7 @@ class SponsoredRewardCycleTests(TestCase):
             payment_reference=f'REWARD-PAY-{index}',
             mpesa_transaction_id=f'REWARD-TXN-{index}' if verified else '',
             status='verified' if verified else 'pending',
+            verified_by=self.admin if verified else None,
             verified_at=STARTED_AT if verified else None,
         )
         attempt = SponsoredViewAttempt.objects.create(
@@ -128,6 +129,37 @@ class SponsoredRewardCycleTests(TestCase):
         self.assertEqual(second_cycle.status, 'open')
         self.assertEqual(second_cycle.eligible_completion_count, 1)
         self.assertEqual(first_cycle.entries.count(), 10)
+
+    def test_admin_cycle_ranking_includes_each_contestants_registered_payout_number(self):
+        cycle = None
+        for index in range(10):
+            cycle = self.complete(index, 90 + index)
+
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        response = client.get(reverse('admin-reward-cycles'))
+
+        self.assertEqual(response.status_code, 200)
+        cycle_data = next(
+            (item for item in response.data['results'] if item['id'] == str(cycle.id)),
+            None,
+        )
+        self.assertIsNotNone(
+            cycle_data,
+            [item['id'] for item in response.data['results']],
+        )
+        ranked_winner = cycle_data['ranking'][0]
+        winner_entry = next(
+            entry for entry in cycle_data['entries']
+            if entry['user_id'] == ranked_winner['user_id']
+        )
+        self.assertEqual(ranked_winner['rank'], 1)
+        self.assertEqual(winner_entry['rank'], 1)
+        self.assertEqual(winner_entry['phone_number'], cycle.winner.phone_number)
+
+        client.force_authenticate(cycle.winner)
+        forbidden = client.get(reverse('admin-reward-cycles'))
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_pending_payment_or_flagged_attempt_does_not_create_cycle_entry(self):
         _user, _payment, pending = self.add_participant(1, 99, verified=False)

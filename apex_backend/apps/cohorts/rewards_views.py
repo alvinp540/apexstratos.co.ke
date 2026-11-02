@@ -214,6 +214,7 @@ class AdminRewardCyclesView(APIView):
                 'user_id': str(entry.user_id),
                 'student': entry.user.get_full_name() or entry.user.username,
                 'email': entry.user.email,
+                'phone_number': entry.user.phone_number or '',
                 'payment_reference': entry.payment.payment_reference,
                 'till_number': entry.payment.till_number,
                 'mpesa_transaction_id': entry.payment.mpesa_transaction_id,

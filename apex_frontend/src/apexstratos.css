@@ -523,6 +523,52 @@ body {
   font-size: 11px;
 }
 
+.reward-cycle-ranking {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-hi);
+}
+
+.reward-cycle-ranking h5 {
+  margin: 0 0 10px;
+  font: 600 12px var(--display);
+}
+
+.reward-cycle-ranking-row {
+  display: grid;
+  grid-template-columns: 42px minmax(100px, 1fr) minmax(120px, auto);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.reward-cycle-ranking-row > strong {
+  color: var(--lime);
+  font: 11px var(--mono);
+}
+
+.reward-cycle-ranking-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.reward-cycle-phone {
+  font: 11px var(--mono);
+  user-select: all;
+}
+
+.reward-cycle-ranking > p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
 .support-eligibility-rules {
   padding: 10px;
   border-left: 2px solid var(--lime);
