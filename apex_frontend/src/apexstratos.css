@@ -196,6 +196,57 @@ body {
   padding: 20px;
 }
 
+.dashboard-guide-step {
+  min-height: 0;
+  padding: 0;
+}
+
+.dashboard-guide-step summary {
+  position: relative;
+  display: grid;
+  min-height: 74px;
+  align-content: center;
+  gap: 12px;
+  padding: 17px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.dashboard-guide-step summary::-webkit-details-marker {
+  display: none;
+}
+
+.dashboard-guide-step summary::after {
+  content: '+';
+  position: absolute;
+  right: 20px;
+  color: var(--lime-dim);
+  font: 16px var(--mono);
+}
+
+.dashboard-guide-step details[open] summary::after {
+  content: '−';
+}
+
+.dashboard-guide-step summary span {
+  color: var(--lime-dim);
+  font: 10px var(--mono);
+}
+
+.dashboard-guide-step summary strong {
+  padding-right: 20px;
+  font-size: 15px;
+}
+
+.dashboard-guide-step details[open] > p,
+.dashboard-guide-step details[open] > a {
+  margin: 0 20px 12px;
+}
+
+.dashboard-guide-step details[open] > a {
+  margin-bottom: 20px;
+}
+
 .step-card h3 {
   margin: 15px 0 8px;
   font-size: 15px;
