@@ -16,11 +16,11 @@ from .models import (
     SponsoredViewRewardCycleEntry,
 )
 from .weekly_schedule import EAT
-
-
-ENTRY_FEE_KES = 20
-CYCLE_SIZE = 10
-STANDARD_AWARD_KES = 100
+from .sponsored_view_rules import (
+    SPONSORED_VIEW_CYCLE_SIZE,
+    SPONSORED_VIEW_REWARD_TIERS,
+    reward_for_fee,
+)
 
 
 def _rank_key(entry):
@@ -41,14 +41,21 @@ def _finish_cycle(cycle):
         payment = entry.payment
         valid = (
             payment.status == 'verified'
-            and payment.amount_kes == ENTRY_FEE_KES
+            and payment.amount_kes == cycle.participation_fee_kes
+            and payment.amount_kes in SPONSORED_VIEW_REWARD_TIERS
             and payment.till_number == SponsoredViewPayment.PAYMENT_TILL_NUMBER
+            and payment.verified_by_id is not None
             and payment.verified_at is not None
+            and bool(payment.mpesa_transaction_id)
+            and payment.user_id == entry.user_id
+            and payment.assessment_id == cycle.assessment_id
             and attempt.status in {'graded', 'timed_out'}
             and not attempt.is_flagged
             and attempt.score is not None
             and attempt.submitted_at is not None
             and attempt.score == entry.score
+            and attempt.user_id == entry.user_id
+            and attempt.assessment_id == cycle.assessment_id
         )
         if valid:
             valid_entries.append(entry)
@@ -57,6 +64,11 @@ def _finish_cycle(cycle):
             entry.save(update_fields=('status',))
 
     cycle.eligible_completion_count = len(valid_entries)
+    if cycle.target_completion_count != SPONSORED_VIEW_CYCLE_SIZE:
+        raise ValueError('Sponsored View reward cycles must contain exactly ten completions.')
+    expected_prize = reward_for_fee(cycle.participation_fee_kes)
+    if expected_prize is None or cycle.prize_amount_kes != expected_prize:
+        raise ValueError('The reward cycle tier does not match its published fee and prize.')
     if len(valid_entries) < cycle.target_completion_count:
         cycle.status = 'open'
         cycle.full_at = None
@@ -79,7 +91,7 @@ def _finish_cycle(cycle):
     gross_revenue = cycle.target_completion_count * cycle.participation_fee_kes
     platform_allocation = gross_revenue // 2
     rewards_allocation = gross_revenue - platform_allocation
-    award_amount = STANDARD_AWARD_KES if winner and rewards_allocation >= STANDARD_AWARD_KES else 0
+    award_amount = cycle.prize_amount_kes if winner and rewards_allocation >= cycle.prize_amount_kes else 0
     reserve = rewards_allocation - award_amount
     cycle.status = 'finalizing'
     cycle.save(update_fields=('status', 'eligible_completion_count'))
@@ -105,9 +117,14 @@ def _finish_cycle(cycle):
             'target_completions': cycle.target_completion_count,
             'minimum_score': assessment.reward_minimum_score,
             'ranking': ['score descending', 'submitted_at ascending', 'user UUID ascending'],
-            'payment_source': 'admin-verified SponsoredViewPayment, KES 20, company Till 1598106',
+            'payment_source': (
+                f'admin-verified SponsoredViewPayment, KES {cycle.participation_fee_kes}, '
+                'company Till 1598106'
+            ),
             'eligible_attempts': ['graded', 'timed_out'],
             'allocation': '50% platform / 50% rewards',
+            'participation_fee_kes': cycle.participation_fee_kes,
+            'prize_amount_kes': cycle.prize_amount_kes,
             'winner_user_id': str(winner.user_id) if award_amount else None,
         },
         status='finalized',
@@ -167,10 +184,10 @@ def _finish_cycle(cycle):
         send_notification(
             user=winner.user,
             notification_type='payment',
-            title='You won a KES 100 Sponsored View reward',
+            title=f'You won a KES {award_amount} Sponsored View reward',
             message=(
                 f'You ranked first in reward cycle {cycle.cycle_number} for '
-                f'{assessment.title} ({cycle.capability}) and won KES 100. '
+                f'{assessment.title} ({cycle.capability}) and won KES {award_amount}. '
                 'Submit a claim to begin payout review.'
             ),
             action_url='/rewards',
@@ -189,7 +206,7 @@ def _finish_cycle(cycle):
                 message=(
                     f'Cycle {cycle.cycle_number} for {assessment.title} ({cycle.capability}) '
                     'reached ten completions with no participant meeting the published minimum score. '
-                    'The KES 100 rewards allocation remains in reserve.'
+                    f'The KES {cycle.prize_amount_kes} rewards allocation remains in reserve.'
                 ),
                 action_url='/admin',
                 metadata={'cycle_id': str(cycle.id)},
@@ -197,8 +214,13 @@ def _finish_cycle(cycle):
 
     SponsoredViewRewardCycle.objects.get_or_create(
         assessment=assessment,
+        participation_fee_kes=cycle.participation_fee_kes,
         cycle_number=cycle.cycle_number + 1,
-        defaults={'capability': cycle.capability},
+        defaults={
+            'capability': cycle.capability,
+            'prize_amount_kes': cycle.prize_amount_kes,
+            'financial_rule_version': '10-completion-50-50-tiered-v1',
+        },
     )
     return cycle
 
@@ -245,8 +267,11 @@ def record_sponsored_view_completion(attempt_id):
         or attempt.score is None
         or attempt.submitted_at is None
         or attempt.payment.status != 'verified'
-        or attempt.payment.amount_kes != ENTRY_FEE_KES
+        or attempt.payment.amount_kes not in SPONSORED_VIEW_REWARD_TIERS
         or attempt.payment.till_number != SponsoredViewPayment.PAYMENT_TILL_NUMBER
+        or attempt.payment.verified_by_id is None
+        or attempt.payment.verified_at is None
+        or not attempt.payment.mpesa_transaction_id
         or attempt.payment.user_id != attempt.user_id
         or attempt.payment.assessment_id != attempt.assessment_id
     ):
@@ -260,8 +285,11 @@ def record_sponsored_view_completion(attempt_id):
             return finalize_sponsored_reward_cycle(cycle.id)
         return cycle
 
+    fee_kes = attempt.payment.amount_kes
+    prize_kes = reward_for_fee(fee_kes)
     latest = SponsoredViewRewardCycle.objects.select_for_update().filter(
         assessment=assessment,
+        participation_fee_kes=fee_kes,
     ).order_by('-cycle_number').first()
     if latest and latest.status in {'full', 'failed'}:
         finalize_sponsored_reward_cycle(latest.id)
@@ -275,14 +303,24 @@ def record_sponsored_view_completion(attempt_id):
     elif latest:
         cycle, _ = SponsoredViewRewardCycle.objects.get_or_create(
             assessment=assessment,
+            participation_fee_kes=fee_kes,
             cycle_number=latest.cycle_number + 1,
-            defaults={'capability': assessment.field},
+            defaults={
+                'capability': assessment.field,
+                'prize_amount_kes': prize_kes,
+                'financial_rule_version': '10-completion-50-50-tiered-v1',
+            },
         )
     else:
         cycle, _ = SponsoredViewRewardCycle.objects.get_or_create(
             assessment=assessment,
+            participation_fee_kes=fee_kes,
             cycle_number=1,
-            defaults={'capability': assessment.field},
+            defaults={
+                'capability': assessment.field,
+                'prize_amount_kes': prize_kes,
+                'financial_rule_version': '10-completion-50-50-tiered-v1',
+            },
         )
 
     if cycle.entries.filter(user_id=attempt.user_id).exists():
@@ -299,6 +337,7 @@ def record_sponsored_view_completion(attempt_id):
                 eligibility_snapshot={
                     'payment_status': attempt.payment.status,
                     'payment_amount_kes': attempt.payment.amount_kes,
+                    'prize_amount_kes': prize_kes,
                     'payment_till_number': attempt.payment.till_number,
                     'payment_reference': attempt.payment.payment_reference,
                     'payment_transaction_id': attempt.payment.mpesa_transaction_id,
@@ -313,7 +352,7 @@ def record_sponsored_view_completion(attempt_id):
         return cycle
 
     cycle.eligible_completion_count = cycle.entries.filter(status='eligible').count()
-    if cycle.eligible_completion_count >= cycle.target_completion_count:
+    if cycle.eligible_completion_count >= SPONSORED_VIEW_CYCLE_SIZE:
         cycle.status = 'full'
         cycle.full_at = timezone.now()
         cycle.save(update_fields=('eligible_completion_count', 'status', 'full_at'))

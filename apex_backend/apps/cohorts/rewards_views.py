@@ -40,6 +40,8 @@ def _claim_payload(claim):
         'settlement_date': settlement.settlement_date,
         'cycle_id': str(cycle.id) if cycle else None,
         'cycle_number': cycle.cycle_number if cycle else None,
+        'participation_fee_kes': cycle.participation_fee_kes if cycle else None,
+        'prize_amount_kes': cycle.prize_amount_kes if cycle else award.amount_kes,
         'selection': award.selection,
         'score': award.score,
         'rank': award.rank,
@@ -117,6 +119,7 @@ class AdminRewardSettlementsView(APIView):
                 'reward_cycle_id': str(row.reward_cycle_id) if row.reward_cycle_id else None,
                 'settlement_date': row.settlement_date, 'eligible_participant_count': row.eligible_participant_count,
                 'cycle_number': row.reward_cycle.cycle_number if row.reward_cycle_id else None,
+                'participation_fee_kes': row.participation_fee_kes,
                 'total_revenue_kes': row.total_revenue_kes, 'platform_share_kes': row.platform_share_kes,
                 'rewards_budget_kes': row.rewards_budget_kes, 'primary_winner_count': row.primary_winner_count,
                 'secondary_winner_count': row.secondary_winner_count, 'awarded_total_kes': row.awarded_total_kes,
@@ -185,6 +188,7 @@ class AdminRewardCyclesView(APIView):
             'settlement_status': cycle.settlement_status,
             'payout_status': cycle.payout_status,
             'participation_fee_kes': cycle.participation_fee_kes,
+            'prize_amount_kes': cycle.prize_amount_kes,
             'target_completion_count': cycle.target_completion_count,
             'eligible_completion_count': cycle.eligible_completion_count,
             'opened_at': cycle.opened_at,
@@ -199,7 +203,11 @@ class AdminRewardCyclesView(APIView):
             'gross_revenue_kes': cycle.gross_revenue_kes,
             'platform_allocation_kes': cycle.platform_allocation_kes,
             'rewards_allocation_kes': cycle.rewards_allocation_kes,
-            'award_amount_kes': cycle.award_amount_kes,
+            'award_amount_kes': (
+                cycle.award_amount_kes
+                if cycle.status in {'finalized', 'exception'}
+                else 0
+            ),
             'finalization_attempt_count': cycle.finalization_attempt_count,
             'error_message': cycle.error_message,
             'entries': [{
@@ -261,7 +269,12 @@ class AdminRewardClaimsView(APIView):
                     return Response({'status': 'Only submitted claims can be verified.'}, status=status.HTTP_409_CONFLICT)
                 award = claim.award
                 if award.status != 'awarded' or award.payment.status != 'verified':
-                    return Response({'status': 'The award or its KES 20 payment is no longer eligible.'}, status=status.HTTP_409_CONFLICT)
+                    return Response({
+                        'status': (
+                            f'The award or its KES {award.payment.amount_kes} payment '
+                            'is no longer eligible.'
+                        ),
+                    }, status=status.HTTP_409_CONFLICT)
                 try:
                     attempt = award.payment.attempt
                 except SponsoredViewAttempt.DoesNotExist:

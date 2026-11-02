@@ -5,15 +5,19 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Max, Prefetch, Q
 from datetime import timedelta
 import random
+from collections import defaultdict
 
 from .models import (
     Cohort,
     Assessment,
     AssessmentAttempt,
+    AssessmentScheduleAttempt,
     CohortEnrollment,
+    SponsoredViewAttempt,
+    SponsoredViewRewardCycleEntry,
     Tutorial,
     TutorialAttempt,
     TutorialProgress,
@@ -31,6 +35,176 @@ from apps.accounts.permissions import IsAdmin
 from .allocation import allocate_cohort_rewards
 from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, activity_window, attempt_deadline, weekly_schedule
 from utils.pagination import StandardResultsPagination
+
+
+def _participant_scores(queryset, group_field):
+    scores = defaultdict(list)
+    for row in queryset.order_by().values(group_field, 'user_id').annotate(best_score=Max('score')):
+        scores[row[group_field]].append(row['best_score'])
+    return scores
+
+
+def _rank_for_score(scores_by_group, group_id, score):
+    scores = scores_by_group.get(group_id, [])
+    if not scores:
+        return None, 0
+    return 1 + sum(participant_score > score for participant_score in scores), len(scores)
+
+
+class MyTestResultsView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+        scheduled_attempts = list(
+            AssessmentScheduleAttempt.objects.filter(user=user)
+            .select_related('assessment')
+            .order_by('-started_at')
+        )
+        tutorial_attempts = list(
+            TutorialAttempt.objects.filter(user=user)
+            .select_related('tutorial')
+            .order_by('-started_at')
+        )
+        cohort_attempts = list(
+            AssessmentAttempt.objects.filter(user=user)
+            .select_related('assessment', 'cohort')
+            .order_by('-started_at')
+        )
+        sponsored_attempts = list(
+            SponsoredViewAttempt.objects.filter(user=user)
+            .select_related('assessment', 'reward_cycle_entry__cycle')
+            .order_by('-started_at')
+        )
+
+        scheduled_scores = _participant_scores(
+            AssessmentScheduleAttempt.objects.filter(
+                assessment_id__in={attempt.assessment_id for attempt in scheduled_attempts},
+                status__in=('graded', 'timed_out'),
+                score__isnull=False,
+                is_flagged=False,
+            ),
+            'assessment_id',
+        )
+        tutorial_scores = _participant_scores(
+            TutorialAttempt.objects.filter(
+                tutorial_id__in={attempt.tutorial_id for attempt in tutorial_attempts},
+                status__in=('graded', 'timed_out'),
+                score__isnull=False,
+            ),
+            'tutorial_id',
+        )
+        cohort_scores = _participant_scores(
+            AssessmentAttempt.objects.filter(
+                assessment_id__in={attempt.assessment_id for attempt in cohort_attempts},
+                status__in=('graded', 'timed_out'),
+                score__isnull=False,
+                is_flagged=False,
+            ),
+            'assessment_id',
+        )
+        cycle_ids = {
+            attempt.reward_cycle_entry.cycle_id
+            for attempt in sponsored_attempts
+            if hasattr(attempt, 'reward_cycle_entry')
+        }
+        sponsored_scores = _participant_scores(
+            SponsoredViewRewardCycleEntry.objects.filter(
+                cycle_id__in=cycle_ids,
+                status='eligible',
+                attempt__status__in=('graded', 'timed_out'),
+                attempt__is_flagged=False,
+            ),
+            'cycle_id',
+        )
+
+        results = []
+        for attempt in scheduled_attempts:
+            rank, participant_count = (None, 0)
+            if attempt.score is not None and attempt.status in ('graded', 'timed_out') and not attempt.is_flagged:
+                rank, participant_count = _rank_for_score(
+                    scheduled_scores, attempt.assessment_id, attempt.score,
+                )
+            results.append({
+                'id': str(attempt.id),
+                'test_name': attempt.assessment.title,
+                'test_type': 'Main Contest',
+                'category': attempt.assessment.field,
+                'score': attempt.score,
+                'status': attempt.status,
+                'rank': rank,
+                'participant_count': participant_count,
+                'attempted_at': attempt.started_at,
+                'completed_at': attempt.submitted_at,
+            })
+
+        for attempt in tutorial_attempts:
+            rank, participant_count = (None, 0)
+            if attempt.score is not None and attempt.status in ('graded', 'timed_out'):
+                rank, participant_count = _rank_for_score(
+                    tutorial_scores, attempt.tutorial_id, attempt.score,
+                )
+            results.append({
+                'id': str(attempt.id),
+                'test_name': attempt.tutorial.title,
+                'test_type': 'Tutorial',
+                'category': attempt.tutorial.field,
+                'score': attempt.score,
+                'status': attempt.status,
+                'rank': rank,
+                'participant_count': participant_count,
+                'attempted_at': attempt.started_at,
+                'completed_at': attempt.submitted_at,
+            })
+
+        for attempt in cohort_attempts:
+            rank, participant_count = (None, 0)
+            if attempt.score is not None and attempt.status in ('graded', 'timed_out') and not attempt.is_flagged:
+                rank, participant_count = _rank_for_score(
+                    cohort_scores, attempt.assessment_id, attempt.score,
+                )
+            results.append({
+                'id': str(attempt.id),
+                'test_name': attempt.assessment.title,
+                'test_type': 'Cohort assessment',
+                'category': attempt.cohort.title,
+                'score': attempt.score,
+                'status': attempt.status,
+                'rank': rank,
+                'participant_count': participant_count,
+                'attempted_at': attempt.started_at,
+                'completed_at': attempt.submitted_at,
+            })
+
+        for attempt in sponsored_attempts:
+            rank, participant_count = (None, 0)
+            entry = getattr(attempt, 'reward_cycle_entry', None)
+            if (
+                entry and entry.status == 'eligible'
+                and attempt.score is not None
+                and attempt.status in ('graded', 'timed_out')
+                and not attempt.is_flagged
+            ):
+                rank, participant_count = _rank_for_score(
+                    sponsored_scores, entry.cycle_id, attempt.score,
+                )
+                rank = entry.rank or rank
+            results.append({
+                'id': str(attempt.id),
+                'test_name': attempt.assessment.title,
+                'test_type': 'Sponsored View',
+                'category': attempt.assessment.field,
+                'score': attempt.score,
+                'status': attempt.status,
+                'rank': rank,
+                'participant_count': participant_count,
+                'attempted_at': attempt.started_at,
+                'completed_at': attempt.submitted_at,
+                'cohort_number': entry.cycle.cycle_number if entry else None,
+            })
+
+        results.sort(key=lambda result: result['attempted_at'], reverse=True)
+        return Response({'count': len(results), 'results': results})
 
 
 class TutorialListView(APIView):

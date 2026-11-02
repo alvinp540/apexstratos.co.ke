@@ -44,7 +44,7 @@ export default function RewardsPage() {
     <Navbar />
     <main className="page-container">
       <div className="contest-section-heading">
-        <div><div className="eyebrow">STUDENT REWARDS</div><h1>Rewards & payouts</h1><p>Each Sponsored View reward cycle closes after ten eligible, finalized KES 20 participations. The highest-ranked eligible student wins KES 100; claim review and payout confirmation are tracked separately.</p></div>
+        <div><div className="eyebrow">STUDENT REWARDS</div><h1>Rewards & payouts</h1><p>Each Sponsored View fee tier closes after ten eligible, finalized participations. The highest-ranked eligible student can win the tier prize; claim review and payout confirmation are tracked separately.</p></div>
         <button className="button button-quiet" onClick={load} disabled={loading}>Refresh</button>
       </div>
       {error && <p role="alert" className="error-message">{error}</p>}

@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     CohortListView, CohortDetailView, CohortEnrollView,
     CohortAssessmentsView, StartAssessmentView, SaveAssessmentAttemptAnswersView, SubmitAssessmentView,
-    CohortLeaderboardView, HeartbeatView, DailyAvailableCohortsView,
+    CohortLeaderboardView, HeartbeatView, DailyAvailableCohortsView, MyTestResultsView,
     PSPRegistrationListView, PSPRegistrationDetailView, PSPVerifyView,
     AllocateCohortRewardsView,
     CoachPayoutView,
@@ -50,6 +50,7 @@ from .rewards_views import (
 )
 
 urlpatterns = [
+    path('my-test-results/', MyTestResultsView.as_view(), name='my-test-results'),
     path('rewards/', MyRewardClaimsView.as_view(), name='my-sponsored-rewards'),
     path('rewards/<uuid:claim_id>/claim/', SubmitRewardClaimView.as_view(), name='submit-sponsored-reward-claim'),
     path('admin/rewards/settlements/', AdminRewardSettlementsView.as_view(), name='admin-reward-settlements'),

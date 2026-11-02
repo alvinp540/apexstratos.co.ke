@@ -7,6 +7,7 @@ import re
 from math import isfinite
 from apps.accounts.models import User
 from .tutorial_schedule import CAPABILITY_FIELDS
+from .sponsored_view_rules import SPONSORED_VIEW_REWARD_TIERS
 
 
 class Cohort(models.Model):
@@ -695,7 +696,10 @@ class SponsoredViewPayment(models.Model):
                 condition=~models.Q(mpesa_transaction_id=''),
                 name='unique_sponsored_view_transaction',
             ),
-            models.CheckConstraint(condition=models.Q(amount_kes=20), name='sponsored_view_price_is_20_kes'),
+            models.CheckConstraint(
+                condition=models.Q(amount_kes__in=tuple(SPONSORED_VIEW_REWARD_TIERS)),
+                name='sponsored_view_price_is_valid_tier',
+            ),
         ]
         indexes = [
             models.Index(fields=['user', 'status', 'requested_at']),
@@ -1226,7 +1230,7 @@ class SponsoredViewRewardCycle(models.Model):
     capability = models.CharField(max_length=40, choices=[(f, f) for f in CAPABILITY_FIELDS], db_index=True)
     cycle_number = models.PositiveIntegerField()
     participation_fee_kes = models.PositiveSmallIntegerField(default=20)
-    financial_rule_version = models.CharField(max_length=32, default='10-completion-50-50-v1')
+    financial_rule_version = models.CharField(max_length=32, default='10-completion-50-50-tiered-v1')
     target_completion_count = models.PositiveSmallIntegerField(default=10)
     eligible_completion_count = models.PositiveSmallIntegerField(default=0)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='open', db_index=True)
@@ -1240,7 +1244,8 @@ class SponsoredViewRewardCycle(models.Model):
     gross_revenue_kes = models.PositiveIntegerField(default=0)
     platform_allocation_kes = models.PositiveIntegerField(default=0)
     rewards_allocation_kes = models.PositiveIntegerField(default=0)
-    award_amount_kes = models.PositiveSmallIntegerField(default=100)
+    award_amount_kes = models.PositiveSmallIntegerField(default=0)
+    prize_amount_kes = models.PositiveSmallIntegerField(default=100)
     settlement_status = models.CharField(max_length=16, default='pending', db_index=True)
     payout_status = models.CharField(max_length=24, choices=PAYOUT_STATUS_CHOICES, default='not_awarded', db_index=True)
     finalization_attempt_count = models.PositiveIntegerField(default=0)
@@ -1249,8 +1254,29 @@ class SponsoredViewRewardCycle(models.Model):
     class Meta:
         db_table = 'sponsored_view_reward_cycles'
         constraints = [
-            models.UniqueConstraint(fields=('assessment', 'cycle_number'), name='unique_sponsored_reward_cycle_number'),
-            models.UniqueConstraint(fields=('assessment',), condition=models.Q(status='open'), name='unique_open_sponsored_reward_cycle'),
+            models.UniqueConstraint(
+                fields=('assessment', 'participation_fee_kes', 'cycle_number'),
+                name='unique_sponsored_reward_cycle_tier_number',
+            ),
+            models.UniqueConstraint(
+                fields=('assessment', 'participation_fee_kes'),
+                condition=models.Q(status='open'),
+                name='unique_open_sponsored_reward_tier_cycle',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    *[
+                        models.Q(participation_fee_kes=fee, prize_amount_kes=prize)
+                        for fee, prize in SPONSORED_VIEW_REWARD_TIERS.items()
+                    ],
+                    _connector=models.Q.OR,
+                ),
+                name='sponsored_reward_cycle_valid_tier',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(target_completion_count=10),
+                name='sponsored_reward_cycle_size_is_ten',
+            ),
         ]
         indexes = [models.Index(fields=('assessment', 'status', 'cycle_number'))]
         ordering = ('assessment_id', 'cycle_number')

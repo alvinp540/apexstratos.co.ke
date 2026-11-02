@@ -426,6 +426,7 @@ export function SponsoredView() {
   const [payments, setPayments] = useState([])
   const [adminPayments, setAdminPayments] = useState([])
   const [paymentReferences, setPaymentReferences] = useState({})
+  const [selectedTiers, setSelectedTiers] = useState({})
   const [transactionIds, setTransactionIds] = useState({})
   const [rejectionReasons, setRejectionReasons] = useState({})
   const [attempt, setAttempt] = useState(null)
@@ -550,15 +551,19 @@ export function SponsoredView() {
   }
 
   const requestPayment = async (assessment) => {
+    const fee = selectedTiers[assessment.id] || 20
     const reference = (paymentReferences[assessment.id] || '').trim()
     if (!reference) {
-      setError('Enter the M-Pesa reference for your KSh 20 payment.')
+      setError(`Enter the M-Pesa reference for your KES ${fee} payment.`)
       return
     }
     setBusy(true)
     setError('')
     try {
-      await api.post(`/cohorts/sponsored-view/assessments/${assessment.id}/payments/`, { payment_reference: reference })
+      await api.post(`/cohorts/sponsored-view/assessments/${assessment.id}/payments/`, {
+        payment_reference: reference,
+        amount_kes: fee,
+      })
       setPaymentReferences((current) => ({ ...current, [assessment.id]: '' }))
       await load()
     } catch (requestError) {
@@ -644,9 +649,9 @@ export function SponsoredView() {
   const updateReasoning = (questionId, value) => setReasoning((current) => ({ ...current, [questionId]: value }))
   const attemptIsOpen = attempt?.status === 'in_progress' && remaining !== 0
 
-  return <Page eyebrow="SPONSORED VIEW" title="Sponsored View Library" description="KSh 20 per attempt. Results and any reward remain subject to published rules, validation, funding, and approval.">
+  return <Page eyebrow="SPONSORED VIEW" title="Sponsored View Library" description="Choose a payment and reward tier before entering. Each tier runs an independent ten-completion cycle.">
     <WeeklyScheduleNotice activity="sponsored_view" hasVerifiedAccess={assessments.some((assessment) => assessment.has_verified_access)} />
-    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Payment requests are accepted every day. Maximum five active entries per capability. An administrator must verify payment before you can start; completed or expired attempts free a place.</span></div>
+    <div className="library-summary"><strong>KES 20 → 100 · 40 → 200 · 80 → 400 · 160 → 800 · 320 → 1,600</strong><span>Each tier has its own cycle of ten eligible, admin-verified assessment completions. Maximum five active entries per capability. Attempts remain five minutes.</span></div>
     <div className="filter-row"><label>Study area<select name="field" value={filters.field} onChange={(event) => setFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={filters.week} onChange={(event) => setFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={filters.topic} onChange={(event) => setFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {status.loading ? <Loading label="Finding published Sponsored View assessments…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : assessments.length === 0 ? <Empty title="No complete, published Sponsored View assessments match these filters">No approved assessment content is currently available for this selection. The published content count is zero; no placeholder assessments are shown.</Empty> : <div className="content-grid">{assessments.map((assessment) => {
@@ -658,6 +663,10 @@ export function SponsoredView() {
         || pendingPayment
         || assessmentPayments[0]
       const locked = !assessment.has_verified_access
+      const selectedFee = selectedTiers[assessment.id] || 20
+      const selectedTier = assessment.reward_tiers?.find((tier) => tier.fee_kes === selectedFee)
+        || assessment.reward_tiers?.[0]
+      const currentCycle = selectedTier?.cycle || assessment.reward_cycle
       const capabilityAtLimit = assessment.active_entries_for_capability >= assessment.active_entry_limit
       const canRequestAnother = !capabilityAtLimit && !pendingPayment && (
         !payment
@@ -669,19 +678,20 @@ export function SponsoredView() {
         <div className={`assessment-preview${locked ? ' assessment-preview-locked' : ''}`} aria-hidden={locked || undefined}>
           <h2>{assessment.title}</h2><p>{assessment.description}</p>
         </div>
-        {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 20 payment is verified. Submit the payment reference below to request access.</p>}
+        {locked && <p className="assessment-lock-notice" role="status">Preview locked until your selected tier payment is verified. Submit the payment reference below to request access.</p>}
         <p>{assessment.has_verified_access ? 'Verified payment · assessment can be started now' : 'Payment requests are open every day · access follows administrator verification'}</p>
-        <div className="tutorial-meta"><span>{assessment.question_count} questions</span><span>KSh {assessment.access_price_kes} per attempt</span></div>
+        <div className="tutorial-meta"><span>{assessment.question_count} questions</span><span>Five-minute assessment</span></div>
         <p className="contest-status">{assessment.field} active entries: {assessment.active_entries_for_capability}/{assessment.active_entry_limit}</p>
-        <p className="contest-status">Reward cycle {assessment.reward_cycle?.cycle_number}: {assessment.reward_cycle?.eligible_completion_count}/{assessment.reward_cycle?.target_completion_count} eligible completions · {assessment.reward_cycle?.status?.replaceAll('_', ' ')}</p>
-        {assessment.reward_cycle?.ranking?.length > 0 && <div className="sponsored-ranking">
+        <label className="sponsored-tier-select">Payment and reward tier<select value={selectedFee} onChange={(event) => setSelectedTiers((current) => ({ ...current, [assessment.id]: Number(event.target.value) }))}>{assessment.reward_tiers?.map((tier) => <option key={tier.fee_kes} value={tier.fee_kes}>KES {tier.fee_kes} fee → KES {tier.prize_kes} prize</option>)}</select></label>
+        <p className="contest-status">KES {selectedTier?.fee_kes} tier · KES {selectedTier?.prize_kes} prize · cycle {currentCycle?.cycle_number}: {currentCycle?.eligible_completion_count}/{currentCycle?.target_completion_count} eligible completions · {currentCycle?.status?.replaceAll('_', ' ')}</p>
+        {currentCycle?.ranking?.length > 0 && <div className="sponsored-ranking">
           <div className="sponsored-ranking-heading">
-            <strong>Cohort #{assessment.reward_cycle.cycle_number} ranking</strong>
+            <strong>KES {selectedFee} tier · cycle #{currentCycle.cycle_number} ranking</strong>
             <span>Contacts are private</span>
           </div>
           <table>
             <thead><tr><th scope="col">Rank</th><th scope="col">Participant</th><th scope="col">Score</th></tr></thead>
-            <tbody>{assessment.reward_cycle.ranking.map((participant) => <tr key={`${assessment.reward_cycle.cycle_number}-${participant.rank}-${participant.display_name}`}>
+            <tbody>{currentCycle.ranking.map((participant) => <tr key={`${selectedFee}-${currentCycle.cycle_number}-${participant.rank}-${participant.display_name}`}>
               <td>#{participant.rank}</td>
               <td>{participant.display_name}</td>
               <td>{participant.score}%</td>
@@ -691,13 +701,13 @@ export function SponsoredView() {
         {payment && <p className={`contest-status status-${payment.status}`}>Payment: {payment.status.replaceAll('_', ' ')}{payment.rejection_reason ? ` — ${payment.rejection_reason}` : ''}</p>}
         {assessmentPayments.filter((item) => item.id !== payment?.id).map((otherPayment) => <p key={otherPayment.id}>Another attempt: payment {otherPayment.status.replaceAll('_', ' ')}{otherPayment.attempt?.score != null ? ` · score ${otherPayment.attempt.score}%` : ''}</p>)}
         {payment?.attempt && <p>Attempt: {payment.attempt.status.replaceAll('_', ' ')}{payment.attempt.score != null ? ` · Score ${payment.attempt.score}%` : ''}</p>}
-        {payment?.attempt?.reward_cycle && <p className="contest-status">This completion is in reward cycle {payment.attempt.reward_cycle.cycle_number}: {payment.attempt.reward_cycle.status.replaceAll('_', ' ')}{payment.attempt.reward_cycle.winner ? ' · You won this cycle' : ''}</p>}
+        {payment?.attempt?.reward_cycle && <p className="contest-status">This completion is in the KES {payment.attempt.reward_cycle.participation_fee_kes} tier cycle {payment.attempt.reward_cycle.cycle_number} (KES {payment.attempt.reward_cycle.prize_amount_kes} prize): {payment.attempt.reward_cycle.status.replaceAll('_', ' ')}{payment.attempt.reward_cycle.winner ? ' · You won this cycle' : ''}</p>}
         {payment?.status === 'verified' && <button className="button button-primary" disabled={busy || (!assessment.can_start && payment.attempt?.status !== 'in_progress')} onClick={() => beginAttempt(payment.id)}>{payment.attempt?.status === 'in_progress' ? 'Resume assessment' : payment.attempt ? 'View result' : 'Start assessment'}</button>}
         {pendingPayment && <p role="status">Payment is awaiting administrator verification. Your library access will appear here as soon as it is verified.</p>}
         {capabilityAtLimit && !pendingPayment && <p className="assessment-lock-notice" role="status">You have reached the maximum of five active entries for {assessment.field}. You can continue participating in other capabilities.</p>}
         {canRequestAnother && <div className="contest-payment-in-card">
           <form className="contest-card-payment-form" onSubmit={(event) => { event.preventDefault(); requestPayment(assessment) }}>
-            <div className="contest-payment-instructions"><strong>Pay KSh 20 to the official Apex Till.</strong><span>Use Till number 1598106. An admin checks the transaction and verifies access to this Sponsored View assessment.</span></div>
+            <div className="contest-payment-instructions"><strong>Pay KES {selectedTier?.fee_kes} to the official Apex Till for a KES {selectedTier?.prize_kes} tier prize.</strong><span>Use Till number 1598106. An admin checks and verifies the payment before access is granted.</span></div>
             <label>M-Pesa transaction reference<input required minLength={5} maxLength={255} autoComplete="off" value={paymentReferences[assessment.id] || ''} onChange={(event) => setPaymentReferences((current) => ({ ...current, [assessment.id]: event.target.value }))} /></label>
             <button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Submit payment reference'}</button>
           </form>
@@ -720,7 +730,7 @@ export function SponsoredView() {
       {attemptIsOpen && <button className="button button-primary" disabled={busy || answers && Object.keys(answers).length !== attempt.questions.length} onClick={submitAttempt}>{busy ? 'Submitting…' : 'Submit assessment'}</button>}
       {(attempt.status === 'graded' || attempt.status === 'timed_out') && <p role="status">Final score: {attempt.score}%</p>}
     </section>}
-    {isAdmin && <section className="panel admin-support-applications"><div className="contest-section-heading"><div><div className="eyebrow">ADMIN ONLY · PRIVATE PAYMENT DETAILS</div><h2>Sponsored View payment review</h2><p>Compare each submitted KES 20 reference with the company Till transactions, then confirm the payment before granting access. Each verified payment grants one attempt.</p></div><button className="button button-quiet" onClick={load}>↻ Refresh</button></div>
+    {isAdmin && <section className="panel admin-support-applications"><div className="contest-section-heading"><div><div className="eyebrow">ADMIN ONLY · PRIVATE PAYMENT DETAILS</div><h2>Sponsored View payment review</h2><p>Compare each submitted reference and exact tier amount with the company Till transaction before granting access. Each verified payment grants one attempt.</p></div><button className="button button-quiet" onClick={load}>↻ Refresh</button></div>
       {adminError ? <ErrorState message={adminError} retry={load} /> : adminPayments.length === 0 ? <Empty title="No Sponsored View payments to review" /> : <div className="support-application-list">{adminPayments.map((payment) => <article className="support-application-status" key={payment.id}><strong>{payment.student_name} · {payment.assessment_title}</strong><span>{payment.status} · KSh {payment.amount_kes} · Till {payment.till_number}</span><small>{payment.student_email} · {payment.field} · {payment.payment_reference}</small>{payment.status === 'pending' && <div className="form-stack">
         <label>Confirmed M-Pesa transaction ID<input required value={transactionIds[payment.id] || ''} onChange={(event) => setTransactionIds((current) => ({ ...current, [payment.id]: event.target.value }))} /></label>
         <button className="button button-primary" disabled={busy} onClick={() => reviewPayment(payment, 'verified')}>Verify payment and grant access</button>

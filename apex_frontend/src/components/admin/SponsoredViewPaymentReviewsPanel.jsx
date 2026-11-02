@@ -77,7 +77,7 @@ export default function SponsoredViewPaymentReviewsPanel() {
       <div>
         <div className="eyebrow">ADMIN ONLY · PAYMENT VERIFICATION</div>
         <h2 id="sponsored-view-payment-reviews-title">Sponsored View payments</h2>
-        <p>Check KSh 20 references against the company Till transactions. Verification grants access to the assessment.</p>
+        <p>Check the submitted tier amount and payment reference against the company Till transaction. Verification grants access to the assessment.</p>
       </div>
       <button className="button button-quiet" type="button" onClick={load} disabled={loading}>Refresh queue</button>
     </div>

@@ -25,6 +25,7 @@ export function Merit() {
   const [history, setHistory] = useState([])
   const [ranking, setRanking] = useState(null)
   const [leaders, setLeaders] = useState([])
+  const [testResults, setTestResults] = useState([])
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(true)
   const load = async () => {
@@ -32,6 +33,7 @@ export function Merit() {
     const requests = [
       ['score', '/trust/score/'], ['history', '/trust/score/history/'],
       ['ranking', '/rankings/me/'], ['leaders', '/rankings/global/'],
+      ['testResults', '/cohorts/my-test-results/'],
     ]
     const results = await Promise.all(requests.map(async ([key, url]) => {
       try { return [key, (await api.get(url)).data, ''] }
@@ -42,6 +44,7 @@ export function Merit() {
     setHistory(unwrapList(next.history))
     setRanking(next.ranking)
     setLeaders(unwrapList(next.leaders))
+    setTestResults(unwrapList(next.testResults))
     setErrors(Object.fromEntries(results.filter(([, , error]) => error).map(([key, , error]) => [key, error])))
     setLoading(false)
   }
@@ -49,6 +52,24 @@ export function Merit() {
   return <Page eyebrow="YOUR WORK, REFLECTED" title="Merit & rankings" description="Trust and ranking data returned by Apex. Scores and placements are calculated by the platform.">
     {loading ? <Loading label="Loading your merit record…" /> : errors.score && errors.ranking ? <ErrorState message={`${errors.score} ${errors.ranking}`} retry={load} /> : <><div className="merit-overview"><div className="merit-score"><span className="eyebrow">OVERALL MERIT SCORE</span>{errors.score ? <strong className="metric-unavailable">Unavailable</strong> : score ? <><strong>{score.overall_merit_score}</strong><span className="tier-badge">{score.tier || 'Tier not listed'}</span><small>Last calculated {score.last_calculated ? new Date(score.last_calculated).toLocaleDateString() : 'not listed'}</small></> : <Empty title="No merit score yet">Apex has not returned a trust record for this account.</Empty>}</div><div className="rank-card"><span className="eyebrow">GLOBAL RANK</span>{errors.ranking ? <strong className="metric-unavailable">Unavailable</strong> : ranking ? <><strong>#{ranking.global_rank}</strong><span>{ranking.rank_movement > 0 ? `↑ ${ranking.rank_movement}` : ranking.rank_movement < 0 ? `↓ ${Math.abs(ranking.rank_movement)}` : 'No movement recorded'}</span><small>{ranking.profession || 'Profession not set'}</small></> : <span>No ranking record available.</span>}</div></div>
       {score && <div className="score-components">{[['PSP consistency', score.psp_consistency_score], ['Cohort performance', score.cohort_performance_score], ['Vendor ratings', score.vendor_rating_score], ['Authenticity confidence', score.authenticity_confidence]].map(([label, value]) => <div className="score-component" key={label}><span>{label}</span><strong>{value ?? '—'}</strong></div>)}</div>}
+      <section className="panel merit-test-results">
+        <div className="panel-heading"><h2>Assessment results</h2><span className="soft-label">Your attempts, final scores, and test rankings</span></div>
+        {errors.testResults ? <ErrorState message={errors.testResults} retry={load} /> : testResults.length ? <div className="merit-test-results-scroll"><table>
+          <thead><tr><th scope="col">Test</th><th scope="col">Type</th><th scope="col">Attempted</th><th scope="col">Status</th><th scope="col">Final score</th><th scope="col">Test rank</th></tr></thead>
+          <tbody>{testResults.map((result) => {
+            const completed = ['graded', 'timed_out'].includes(result.status)
+            const testType = result.cohort_number ? `${result.test_type} · Cohort #${result.cohort_number}` : result.test_type
+            return <tr key={`${result.test_type}-${result.id}`}>
+              <td><strong>{result.test_name}</strong><small>{result.category}</small></td>
+              <td>{testType}</td>
+              <td>{result.attempted_at ? new Date(result.attempted_at).toLocaleDateString() : '—'}</td>
+              <td>{result.status.replaceAll('_', ' ')}</td>
+              <td>{completed && result.score != null ? `${result.score}%` : '—'}</td>
+              <td>{result.rank ? `#${result.rank}${result.participant_count ? ` of ${result.participant_count}` : ''}` : '—'}</td>
+            </tr>
+          })}</tbody>
+        </table></div> : <Empty title="No test attempts yet">Your attempted tests, final scores, and rankings will appear here after you begin an assessment.</Empty>}
+      </section>
       <div className="dashboard-bottom merit-lower"><section className="panel"><div className="panel-heading"><h2>Global leaderboard</h2><span className="soft-label">Platform rankings</span></div>{errors.leaders ? <ErrorState message={errors.leaders} retry={load} /> : leaders.length ? <div className="leader-list">{leaders.slice(0, 10).map((leader) => <div className="leader-row" key={leader.id}><span className="leader-rank">#{leader.global_rank}</span><span className="leader-name">{leader.full_name || 'Apex member'}<small>{leader.profession || 'Profession not listed'}</small></span><strong>{leader.overall_merit_score ?? '—'}</strong><span className="tier-badge">{leader.tier || '—'}</span></div>)}</div> : <Empty title="No leaderboard records">Rankings will appear here if the platform has published them.</Empty>}</section><section className="panel"><div className="panel-heading"><h2>Merit history</h2></div>{errors.history ? <ErrorState message={errors.history} retry={load} /> : history.length ? <div className="history-list">{history.map((entry) => <div className="history-row" key={entry.id}><span className="history-dot" /><div><strong>{entry.overall_merit_score}</strong><small>{entry.reason || 'Score update'} · {entry.recorded_at ? new Date(entry.recorded_at).toLocaleDateString() : ''}</small></div></div>)}</div> : <Empty title="No score history yet">Score changes will show when returned by the platform.</Empty>}</section></div>
     </>}
   </Page>

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
@@ -24,10 +25,28 @@ from .models import (
     SponsoredViewPayment,
 )
 from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, EAT
+from .sponsored_view_rules import SPONSORED_VIEW_REWARD_TIERS, reward_for_fee
 
 
 class SponsoredViewPaymentInputSerializer(serializers.Serializer):
     payment_reference = serializers.CharField(max_length=255)
+    amount_kes = serializers.IntegerField(required=False, default=20)
+
+    def to_internal_value(self, data):
+        unknown = set(data) - set(self.fields) if isinstance(data, Mapping) else set()
+        if unknown:
+            raise serializers.ValidationError({
+                key: 'This field is not accepted; tier prizes are determined by the server.'
+                for key in unknown
+            })
+        return super().to_internal_value(data)
+
+    def validate_amount_kes(self, value):
+        if value not in SPONSORED_VIEW_REWARD_TIERS:
+            raise serializers.ValidationError(
+                'Choose one of the published Sponsored View fee tiers: KES 20, 40, 80, 160, or 320.'
+            )
+        return value
 
     def validate_payment_reference(self, value):
         value = value.strip()
@@ -98,6 +117,8 @@ def _attempt_response(attempt):
             'status': cycle_entry.cycle.status,
             'eligible_completion_count': cycle_entry.cycle.eligible_completion_count,
             'target_completion_count': cycle_entry.cycle.target_completion_count,
+            'participation_fee_kes': cycle_entry.cycle.participation_fee_kes,
+            'prize_amount_kes': cycle_entry.cycle.prize_amount_kes,
             'rank': cycle_entry.rank,
             'winner': cycle_entry.cycle.winner_id == attempt.user_id,
         }
@@ -121,15 +142,20 @@ def _attempt_response(attempt):
     }
 
 
-def _current_reward_cycle_summary(assessment):
+def _current_reward_cycle_summary(assessment, fee_kes):
     from .models import SponsoredViewRewardCycle
-    cycle = SponsoredViewRewardCycle.objects.filter(assessment=assessment).order_by('-cycle_number').first()
+    cycle = SponsoredViewRewardCycle.objects.filter(
+        assessment=assessment,
+        participation_fee_kes=fee_kes,
+    ).order_by('-cycle_number').first()
     if not cycle:
         return {
             'cycle_number': 1,
             'status': 'open',
             'eligible_completion_count': 0,
             'target_completion_count': 10,
+            'participation_fee_kes': fee_kes,
+            'prize_amount_kes': reward_for_fee(fee_kes),
             'ranking': [],
         }
     entries = cycle.entries.filter(status='eligible').select_related(
@@ -154,6 +180,8 @@ def _current_reward_cycle_summary(assessment):
         'status': cycle.status,
         'eligible_completion_count': cycle.eligible_completion_count,
         'target_completion_count': cycle.target_completion_count,
+        'participation_fee_kes': cycle.participation_fee_kes,
+        'prize_amount_kes': cycle.prize_amount_kes,
         'ranking': ranking,
     }
 
@@ -244,11 +272,16 @@ class SponsoredViewAssessmentListView(APIView):
                 'question_count': 10,
                 'duration_minutes': assessment.duration_minutes,
                 'access_price_kes': 20,
+                'reward_tiers': [{
+                    'fee_kes': fee_kes,
+                    'prize_kes': prize_kes,
+                    'cycle': _current_reward_cycle_summary(assessment, fee_kes),
+                } for fee_kes, prize_kes in SPONSORED_VIEW_REWARD_TIERS.items()],
                 'active_entries_for_capability': active_counts.get(assessment.field, 0),
                 'active_entry_limit': 5,
                 'has_verified_access': bool(verified_payment),
                 'can_start': bool(verified_payment),
-                'reward_cycle': _current_reward_cycle_summary(assessment),
+                'reward_cycle': _current_reward_cycle_summary(assessment, 20),
                 'window_closes_at': None,
                 'next_opening_at': None,
                 'payment_status': payment.status if payment else None,
@@ -269,6 +302,7 @@ class SponsoredViewPaymentListView(APIView):
                 'assessment_title': payment.assessment.title,
                 'field': payment.assessment.field,
                 'amount_kes': payment.amount_kes,
+                'prize_amount_kes': reward_for_fee(payment.amount_kes),
                 'till_number': payment.till_number,
                 'payment_reference': payment.payment_reference,
                 'status': payment.status,
@@ -340,7 +374,7 @@ class SponsoredViewPaymentCreateView(APIView):
                 payment = SponsoredViewPayment.objects.create(
                     user=request.user,
                     assessment=assessment,
-                    amount_kes=20,
+                    amount_kes=serializer.validated_data['amount_kes'],
                     till_number=SponsoredViewPayment.PAYMENT_TILL_NUMBER,
                     payment_reference=serializer.validated_data['payment_reference'],
                 )
@@ -354,10 +388,14 @@ class SponsoredViewPaymentCreateView(APIView):
             'assessment_id': str(assessment.id),
             'assessment_title': assessment.title,
             'amount_kes': payment.amount_kes,
+            'prize_amount_kes': reward_for_fee(payment.amount_kes),
             'till_number': payment.till_number,
             'payment_reference': payment.payment_reference,
             'status': payment.status,
-            'message': 'Access is granted as soon as an administrator verifies the KSh 20 payment.',
+            'message': (
+                f'Access is granted as soon as an administrator verifies the KES '
+                f'{payment.amount_kes} payment.'
+            ),
         }, status=status.HTTP_201_CREATED)
 
 
@@ -378,6 +416,7 @@ class SponsoredViewPaymentAdminListView(APIView):
                 'assessment_title': payment.assessment.title,
                 'field': payment.assessment.field,
                 'amount_kes': payment.amount_kes,
+                'prize_amount_kes': reward_for_fee(payment.amount_kes),
                 'till_number': payment.till_number,
                 'payment_reference': payment.payment_reference,
                 'mpesa_transaction_id': payment.mpesa_transaction_id,
@@ -440,11 +479,11 @@ class SponsoredViewPaymentDecisionView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if next_status == 'verified' and (
-                payment.amount_kes != 20
+                payment.amount_kes not in SPONSORED_VIEW_REWARD_TIERS
                 or payment.till_number != SponsoredViewPayment.PAYMENT_TILL_NUMBER
             ):
                 return Response(
-                    {'error': 'Confirm a KES 20 payment to company M-Pesa Till 1598106 before verifying access.'},
+                    {'error': 'Confirm the selected published tier payment to company M-Pesa Till 1598106 before verifying access.'},
                     status=status.HTTP_409_CONFLICT,
                 )
             if next_status == 'verified' and (
@@ -554,7 +593,7 @@ class SponsoredViewPaymentDecisionView(APIView):
                         cycle.save(update_fields=('payout_status',))
             title = 'Sponsored View payment verified' if next_status == 'verified' else f'Sponsored View payment {next_status}'
             message = (
-                f'Your KSh 20 payment for {payment.assessment.title} is verified. '
+                f'Your KES {payment.amount_kes} payment for {payment.assessment.title} is verified. '
                 'You can start the assessment at any time.'
                 if next_status == 'verified'
                 else f'Your Sponsored View payment was rejected. {payment.rejection_reason}'
@@ -592,9 +631,13 @@ class StartSponsoredViewAttemptView(APIView):
                 if attempt.status == 'in_progress' and now >= attempt.deadline_at:
                     _finalize_sponsored_view_timeout(attempt, now)
                 return Response(_attempt_response(attempt))
-            if payment.status != 'verified':
+            if (
+                payment.status != 'verified'
+                or payment.amount_kes not in SPONSORED_VIEW_REWARD_TIERS
+                or payment.till_number != SponsoredViewPayment.PAYMENT_TILL_NUMBER
+            ):
                 return Response(
-                    {'error': 'A verified KSh 20 payment is required before starting this assessment.'},
+                    {'error': 'A verified payment for a published Sponsored View tier is required before starting this assessment.'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
             if assessment.status != 'published' or not _assessment_ready(assessment):
