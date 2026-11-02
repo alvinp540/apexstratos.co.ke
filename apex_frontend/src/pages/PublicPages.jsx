@@ -27,6 +27,7 @@ export function Landing() {
         <a href="#merit">Merit</a>
         <a href="#opportunities">Opportunities</a>
         <Link to="/campaigns">Sponsorships</Link>
+        <Link to={user?.is_admin ? '/admin' : '/admin-login'}>Admin</Link>
         {user
           ? <button type="button" className="button button-quiet landing-signout" onClick={signOut}>Sign out</button>
           : <Link to="/login">Sign in</Link>}
@@ -41,6 +42,7 @@ export function Landing() {
             <a href="#merit">Merit</a>
             <a href="#opportunities">Opportunities</a>
             <Link to="/campaigns">Sponsorships</Link>
+            <Link to={user?.is_admin ? '/admin' : '/admin-login'}>Admin</Link>
             {user
               ? <>
                 <Link to="/dashboard">Dashboard</Link>
@@ -69,14 +71,17 @@ export function Landing() {
 }
 
 export function AuthPage({ mode }) {
-  const { user, login, register } = useAuth()
+  const { user, loading, login, register, logout } = useAuth()
   const navigate = useNavigate()
+  const isAdminLogin = mode === 'admin'
   const [params] = useSearchParams()
   const [form, setForm] = useState({ email: '', password: '', username: '', password2: '', phone_number: '', role: 'professional' })
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  if (user) return <Navigate to="/dashboard" replace />
+  if (isAdminLogin && loading) return <div className="full-page-loading"><Loading /></div>
+  if (user?.is_admin && isAdminLogin) return <Navigate to="/admin" replace />
+  if (user && !isAdminLogin) return <Navigate to="/dashboard" replace />
   const update = (event) => setForm({ ...form, [event.target.name]: event.target.value })
   const submit = async (event) => {
     event.preventDefault()
@@ -88,8 +93,12 @@ export function AuthPage({ mode }) {
         const { data } = await register(form)
         setMessage(data.message || 'Registration successful. You can now sign in.')
       } else {
-        await login({ email: form.email, password: form.password })
-        navigate(params.get('next') || '/dashboard', { replace: true })
+        const signedInUser = await login({ email: form.email, password: form.password })
+        if (isAdminLogin && !signedInUser.is_admin) {
+          setError('This account does not have administrator access.')
+          return
+        }
+        navigate(isAdminLogin ? '/admin' : params.get('next') || '/dashboard', { replace: true })
       }
     } catch (err) {
       setError(getErrorMessage(err))
@@ -97,16 +106,17 @@ export function AuthPage({ mode }) {
       setBusy(false)
     }
   }
-  return <div className="auth-screen"><div className="auth-brand"><Link to="/" className="brand"><span className="brand-symbol">A</span><span>APEXSTRATOS</span></Link><span>PROVE · PERFORM · PROGRESS</span></div><div className="auth-panel"><div className="eyebrow">{mode === 'login' ? 'WELCOME BACK' : 'YOUR JOURNEY STARTS HERE'}</div><h1>{mode === 'login' ? 'Good to see you.' : 'Make room to grow.'}</h1><p>{mode === 'login' ? 'Sign in to pick up where you left off.' : 'Create an account to explore learning and opportunities.'}</p>
+  if (user && isAdminLogin) return <div className="auth-screen"><div className="auth-brand"><Link to="/" className="brand"><span className="brand-symbol">A</span><span>APEXSTRATOS</span></Link><span>ADMIN PORTAL</span></div><div className="auth-panel"><div className="eyebrow">RESTRICTED AREA</div><h1>Admin access required.</h1><p>{error || 'Your account is signed in, but it does not have administrator permissions.'}</p><Link className="button button-primary button-large full-width" to="/dashboard">Return to dashboard</Link><button className="button button-quiet full-width" type="button" onClick={logout}>Sign out to use an admin account</button><Link to="/" className="back-link">← Back to ApexStratos</Link></div><div className="auth-footer">SECURE ACCESS · YOUR DATA STAYS YOURS</div></div>
+  return <div className="auth-screen"><div className="auth-brand"><Link to="/" className="brand"><span className="brand-symbol">A</span><span>APEXSTRATOS</span></Link><span>{isAdminLogin ? 'ADMIN PORTAL' : 'PROVE · PERFORM · PROGRESS'}</span></div><div className="auth-panel"><div className="eyebrow">{isAdminLogin ? 'AUTHORIZED ADMINS ONLY' : mode === 'login' ? 'WELCOME BACK' : 'YOUR JOURNEY STARTS HERE'}</div><h1>{isAdminLogin ? 'Admin sign in.' : mode === 'login' ? 'Good to see you.' : 'Make room to grow.'}</h1><p>{isAdminLogin ? 'Sign in with an existing administrator account to continue to the Admin Portal.' : mode === 'login' ? 'Sign in to pick up where you left off.' : 'Create an account to explore learning and opportunities.'}</p>
     {error && <div className="alert alert-error" role="alert">{error}</div>}{message && <div className="alert alert-success" role="status">{message}</div>}
     <form onSubmit={submit} className="form-stack">
       {mode === 'register' && <><label>Username<input name="username" autoComplete="username" required value={form.username} onChange={update} /></label><label>Account type<select name="role" value={form.role} onChange={update}><option value="professional">Student</option><option value="vendor">Organization / vendor</option></select></label></>}
       <label>Email address<input type="email" name="email" autoComplete="email" required value={form.email} onChange={update} /></label>
       {mode === 'register' && <label>Phone number <span className="optional">(optional)</span><input name="phone_number" autoComplete="tel" value={form.phone_number} onChange={update} /></label>}
-      <label>Password<input type="password" name="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : undefined} value={form.password} onChange={update} /></label>
+      <label>Password<input type="password" name="password" autoComplete={mode !== 'register' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : undefined} value={form.password} onChange={update} /></label>
       {mode === 'register' && <label>Confirm password<input type="password" name="password2" autoComplete="new-password" required value={form.password2} onChange={update} /></label>}
-      <button className="button button-primary button-large full-width" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'} <span>↗</span></button>
-    </form><div className="auth-switch">{mode === 'login' ? <>New to ApexStratos? <Link to="/register">Create an account</Link></> : <>Already a member? <Link to="/login">Sign in</Link></>}</div><Link to="/" className="back-link">← Back to ApexStratos</Link></div><div className="auth-footer">SECURE ACCESS · YOUR DATA STAYS YOURS</div></div>
+      <button className="button button-primary button-large full-width" disabled={busy}>{busy ? 'Please wait…' : isAdminLogin ? 'Sign in to Admin' : mode === 'login' ? 'Sign in' : 'Create account'} <span>↗</span></button>
+    </form>{!isAdminLogin && <div className="auth-switch">{mode === 'login' ? <>New to ApexStratos? <Link to="/register">Create an account</Link></> : <>Already a member? <Link to="/login">Sign in</Link></>}</div>}<Link to="/" className="back-link">← Back to ApexStratos</Link></div><div className="auth-footer">SECURE ACCESS · YOUR DATA STAYS YOURS</div></div>
 }
 
 export function Dashboard() {

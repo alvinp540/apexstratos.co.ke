@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Shell from './components/Shell'
 import { useAuth } from './context/AuthContext'
 import { Loading } from './components/States'
@@ -11,15 +11,23 @@ import CampaignCataloguePage from './pages/CampaignCataloguePage'
 
 function Protected() {
   const { user, loading } = useAuth()
+  const location = useLocation()
   if (loading) return <div className="full-page-loading"><Loading /></div>
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) return <Navigate to={location.pathname === '/admin' ? '/admin-login' : '/login'} replace />
   return <Shell />
+}
+
+function AdminOnly() {
+  const { user } = useAuth()
+  if (!user?.is_admin) return <Navigate to="/admin-login" replace />
+  return <Admin />
 }
 
 export default function App() {
   return <Routes>
     <Route path="/" element={<Landing />} />
     <Route path="/login" element={<AuthPage mode="login" />} />
+    <Route path="/admin-login" element={<AuthPage mode="admin" />} />
     <Route path="/register" element={<AuthPage mode="register" />} />
     <Route path="/campaigns" element={<CampaignCataloguePage />} />
     <Route element={<Protected />}>
@@ -35,7 +43,7 @@ export default function App() {
       <Route path="/opportunities" element={<Opportunities />} />
       <Route path="/profile" element={<Profile />} />
       <Route path="/notifications" element={<Notifications />} />
-      <Route path="/admin" element={<Admin />} />
+      <Route path="/admin" element={<AdminOnly />} />
       <Route path="/vendor" element={<VendorManagementPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />

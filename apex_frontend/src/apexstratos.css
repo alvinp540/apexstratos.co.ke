@@ -597,6 +597,10 @@ body {
     line-height: 1.2;
   }
 
+  .mobile-nav-admin a {
+    width: 16.666%;
+  }
+
   .mobile-nav a.active {
     color: var(--lime);
   }
