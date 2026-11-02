@@ -8,7 +8,7 @@ EAT = ZoneInfo('Africa/Nairobi')
 ASSESSMENT_DURATION_SECONDS = 300
 ACTIVITY_WEEKDAYS = {
     'tutorials': frozenset((0, 1, 2, 3)),
-    'sponsored_view': frozenset((0, 1, 2, 3)),
+    'sponsored_view': frozenset(range(7)),
     'main_contest': frozenset((4, 5, 6)),
 }
 IMPLEMENTED_ACTIVITIES = frozenset(('tutorials', 'sponsored_view', 'main_contest'))
@@ -19,6 +19,12 @@ def activity_window(activity, value=None):
     value = (value or timezone.now()).astimezone(EAT)
     if activity not in ACTIVITY_WEEKDAYS:
         raise ValueError(f'Unknown weekly activity: {activity}')
+    if activity == 'sponsored_view':
+        start_date = value.date() - timedelta(days=value.weekday())
+        end_date = start_date + timedelta(days=7)
+        start = timezone.make_aware(datetime.combine(start_date, time.min), EAT)
+        end = timezone.make_aware(datetime.combine(end_date, time.min), EAT)
+        return start, end
     if value.weekday() not in ACTIVITY_WEEKDAYS[activity]:
         return None
 
@@ -33,6 +39,10 @@ def activity_window(activity, value=None):
 
 def next_opening(activity, value=None):
     value = (value or timezone.now()).astimezone(EAT)
+    if activity not in ACTIVITY_WEEKDAYS:
+        raise ValueError(f'Unknown weekly activity: {activity}')
+    if activity == 'sponsored_view':
+        return None
     window = activity_window(activity, value)
     if window:
         return window[0] + timedelta(days=7)
@@ -61,7 +71,7 @@ def activity_status(activity, value=None):
         'can_start': window is not None and implemented,
         'implemented': implemented,
         'opens_at': next_opening(activity, value),
-        'closes_at': window[1] if window else None,
+        'closes_at': window[1] if window and activity != 'sponsored_view' else None,
     }
 
 

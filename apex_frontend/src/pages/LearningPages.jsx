@@ -646,7 +646,7 @@ export function SponsoredView() {
 
   return <Page eyebrow="SPONSORED VIEW" title="Sponsored View Library" description="KSh 20 per attempt. Results and any reward remain subject to published rules, validation, funding, and approval.">
     <WeeklyScheduleNotice activity="sponsored_view" hasVerifiedAccess={assessments.some((assessment) => assessment.has_verified_access)} />
-    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Maximum five active entries per capability. Payment requests are accepted Monday–Thursday; once an admin verifies payment, you can start the assessment at any time. Completed or expired attempts free a place.</span></div>
+    <div className="library-summary"><strong>KSh 20 per attempt</strong><span>Payment requests are accepted every day. Maximum five active entries per capability. An administrator must verify payment before you can start; completed or expired attempts free a place.</span></div>
     <div className="filter-row"><label>Study area<select name="field" value={filters.field} onChange={(event) => setFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={filters.week} onChange={(event) => setFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={filters.topic} onChange={(event) => setFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {status.loading ? <Loading label="Finding published Sponsored View assessments…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : assessments.length === 0 ? <Empty title="No complete, published Sponsored View assessments match these filters">No approved assessment content is currently available for this selection. The published content count is zero; no placeholder assessments are shown.</Empty> : <div className="content-grid">{assessments.map((assessment) => {
@@ -670,7 +670,7 @@ export function SponsoredView() {
           <h2>{assessment.title}</h2><p>{assessment.description}</p>
         </div>
         {locked && <p className="assessment-lock-notice" role="status">Preview locked until your KSh 20 payment is verified. Submit the payment reference below to request access.</p>}
-        <p>{assessment.has_verified_access ? 'Verified payment · assessment can be started now' : assessment.window_closes_at ? `Payment requests close ${new Date(assessment.window_closes_at).toLocaleString()}` : `Payment requests reopen ${assessment.next_opening_at ? new Date(assessment.next_opening_at).toLocaleString() : 'not scheduled'}`}</p>
+        <p>{assessment.has_verified_access ? 'Verified payment · assessment can be started now' : 'Payment requests are open every day · access follows administrator verification'}</p>
         <div className="tutorial-meta"><span>{assessment.question_count} questions</span><span>KSh {assessment.access_price_kes} per attempt</span></div>
         <p className="contest-status">{assessment.field} active entries: {assessment.active_entries_for_capability}/{assessment.active_entry_limit}</p>
         <p className="contest-status">Reward cycle {assessment.reward_cycle?.cycle_number}: {assessment.reward_cycle?.eligible_completion_count}/{assessment.reward_cycle?.target_completion_count} eligible completions · {assessment.reward_cycle?.status?.replaceAll('_', ' ')}</p>
@@ -685,7 +685,7 @@ export function SponsoredView() {
           <form className="contest-card-payment-form" onSubmit={(event) => { event.preventDefault(); requestPayment(assessment) }}>
             <div className="contest-payment-instructions"><strong>Pay KSh 20 to the official Apex Till.</strong><span>Use Till number 1598106. An admin checks the transaction and verifies access to this Sponsored View assessment.</span></div>
             <label>M-Pesa transaction reference<input required minLength={5} maxLength={255} autoComplete="off" value={paymentReferences[assessment.id] || ''} onChange={(event) => setPaymentReferences((current) => ({ ...current, [assessment.id]: event.target.value }))} /></label>
-            <button className="button button-primary" type="submit" disabled={busy || !assessment.window_closes_at}>{busy ? 'Submitting…' : assessment.window_closes_at ? 'Submit payment reference' : 'Payment access Monday–Thursday'}</button>
+            <button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Submit payment reference'}</button>
           </form>
         </div>}
       </article>

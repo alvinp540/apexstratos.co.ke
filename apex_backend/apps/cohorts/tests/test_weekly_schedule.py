@@ -35,6 +35,23 @@ def eat_datetime(year, month, day, hour=0, minute=0, second=0):
 
 
 class WeeklyScheduleRuleTests(TestCase):
+    def test_sponsored_view_is_available_every_day_without_changing_other_windows(self):
+        monday = eat_datetime(2026, 10, 12)
+
+        for day in range(7):
+            current = monday + timedelta(days=day, hours=12)
+            with self.subTest(weekday=current.strftime('%A')):
+                self.assertIsNotNone(activity_window('sponsored_view', current))
+                state = activity_status('sponsored_view', current)
+                self.assertTrue(state['available_now'])
+                self.assertTrue(state['can_start'])
+                self.assertIsNone(state['opens_at'])
+                self.assertIsNone(state['closes_at'])
+
+        friday = monday + timedelta(days=4)
+        self.assertIsNone(activity_window('tutorials', friday))
+        self.assertIsNotNone(activity_window('main_contest', friday))
+
     def test_tutorial_window_ends_at_friday_midnight_and_contest_opens_at_same_boundary(self):
         thursday_last_second = eat_datetime(2026, 10, 15, 23, 59, 59)
         friday_start = eat_datetime(2026, 10, 16)
@@ -270,6 +287,8 @@ class TutorialScheduleAccessTests(TestCase):
         self.assertEqual(response.data['weekday'], 'Friday')
         self.assertFalse(response.data['activities']['tutorials']['available_now'])
         self.assertTrue(response.data['activities']['main_contest']['available_now'])
+        self.assertTrue(response.data['activities']['sponsored_view']['available_now'])
+        self.assertIsNone(response.data['activities']['sponsored_view']['closes_at'])
 
 
 class MainContestScheduleAccessTests(TestCase):

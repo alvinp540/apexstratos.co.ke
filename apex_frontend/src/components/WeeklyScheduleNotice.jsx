@@ -38,8 +38,10 @@ export default function WeeklyScheduleNotice({ activity, hasVerifiedAccess = fal
     <span>i</span>
     <p>{error || !state
       ? error || 'Checking the weekly schedule…'
-      : activity === 'sponsored_view' && hasVerifiedAccess
-        ? 'Your Sponsored View payment is verified. Start or resume this paid assessment at any time; new payment requests are accepted Monday–Thursday EAT.'
+      : activity === 'sponsored_view'
+      ? hasVerifiedAccess
+        ? 'Your Sponsored View payment is verified. Start or resume this paid assessment at any time. New payment requests are accepted every day; assessment access requires administrator verification.'
+        : 'Sponsored View payment requests are accepted every day (EAT). You can start an assessment only after an administrator verifies your payment.'
       : !state.implemented
         ? `${labels[activity]} follow a Monday–Thursday EAT window, but starting is not enabled because the backend assessment and attempt feature is not implemented. ${state.available_now ? `The schedule window closes ${formatEAT(state.closes_at)}.` : `Next opening: ${formatEAT(state.opens_at)}.`}`
       : state.available_now

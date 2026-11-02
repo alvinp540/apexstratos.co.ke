@@ -23,7 +23,7 @@ from .models import (
     SponsoredViewSettlementAdjustment,
     SponsoredViewPayment,
 )
-from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, EAT, activity_window, next_opening
+from .weekly_schedule import ASSESSMENT_DURATION_SECONDS, EAT
 
 
 class SponsoredViewPaymentInputSerializer(serializers.Serializer):
@@ -190,7 +190,6 @@ class SponsoredViewAssessmentListView(APIView):
             assessments = assessments.filter(Q(title__icontains=topic) | Q(description__icontains=topic))
 
         now = timezone.now()
-        window = activity_window('sponsored_view', now)
         active_counts = dict(
             SponsoredViewPayment.objects.filter(
                 user=request.user,
@@ -232,8 +231,8 @@ class SponsoredViewAssessmentListView(APIView):
                 'has_verified_access': bool(verified_payment),
                 'can_start': bool(verified_payment),
                 'reward_cycle': _current_reward_cycle_summary(assessment),
-                'window_closes_at': window[1] if window else None,
-                'next_opening_at': None if window else next_opening('sponsored_view', now),
+                'window_closes_at': None,
+                'next_opening_at': None,
                 'payment_status': payment.status if payment else None,
                 'attempt': _attempt_response(attempt) if attempt else None,
             })
@@ -276,12 +275,6 @@ class SponsoredViewPaymentCreateView(APIView):
             status='published',
         )
         now = timezone.now()
-        window = activity_window('sponsored_view', now)
-        if not window:
-            return Response(
-                {'error': 'Sponsored View payment and attempts are available Monday through Thursday in EAT.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         if not _assessment_ready(assessment):
             return Response(
                 {'error': 'This assessment is not published with ten valid questions and explanations.'},
@@ -544,7 +537,7 @@ class SponsoredViewPaymentDecisionView(APIView):
             title = 'Sponsored View payment verified' if next_status == 'verified' else f'Sponsored View payment {next_status}'
             message = (
                 f'Your KSh 20 payment for {payment.assessment.title} is verified. '
-                'You can start the assessment during its Monday–Thursday EAT window.'
+                'You can start the assessment at any time.'
                 if next_status == 'verified'
                 else f'Your Sponsored View payment was rejected. {payment.rejection_reason}'
             )

@@ -191,7 +191,7 @@ class SponsoredViewAccessTests(TestCase):
         self.assertIn('correct_answer', submitted.data['questions'][0])
         self.assertEqual(SponsoredViewAttempt.objects.count(), 1)
 
-    def test_verified_payment_can_start_after_payment_window_closes(self):
+    def test_pending_payment_cannot_start_later_but_verified_payment_can_start_on_friday(self):
         monday = eat_datetime(2026, 10, 12, 10)
         payment = self.create_payment('SPONSOREDREFAFTERWINDOW', now=monday)
         self.assertEqual(payment.status_code, 201)
@@ -264,11 +264,69 @@ class SponsoredViewAccessTests(TestCase):
         self.assertEqual(attempt.status, 'timed_out')
         self.assertEqual(len(attempt.answers), 1)
 
-    def test_only_weekday_window_allows_payment_requests_and_starts(self):
-        friday = eat_datetime(2026, 10, 16)
-        closed = self.create_payment('SPONSOREDREF2', now=friday)
-        self.assertEqual(closed.status_code, 403)
-        self.assertEqual(SponsoredViewPayment.objects.count(), 0)
+    def test_friday_payment_request_requires_verification_before_start_and_weekend_requests_are_allowed(self):
+        friday = eat_datetime(2026, 10, 16, 10)
+        payment = self.create_payment('SPONSOREDREF2', now=friday)
+        self.assertEqual(payment.status_code, 201)
+        self.assertEqual(payment.data['status'], 'pending')
+
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=friday):
+            pending_start = self.client.post(
+                reverse('sponsored-view-attempt-start', kwargs={'payment_id': payment.data['id']}),
+                {},
+                format='json',
+            )
+        self.assertEqual(pending_start.status_code, 403)
+        self.assertEqual(SponsoredViewAttempt.objects.count(), 0)
+
+        self.client.force_authenticate(self.admin)
+        verified = self.client.post(
+            reverse('sponsored-view-payment-admin-decision', kwargs={'payment_id': payment.data['id']}),
+            {'status': 'verified', 'mpesa_transaction_id': 'SPONSORED-FRIDAY-TXN'},
+            format='json',
+        )
+        self.assertEqual(verified.status_code, 200)
+
+        self.client.force_authenticate(self.student)
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=friday):
+            started = self.client.post(
+                reverse('sponsored-view-attempt-start', kwargs={'payment_id': payment.data['id']}),
+                {},
+                format='json',
+            )
+        self.assertEqual(started.status_code, 201)
+        self.assertEqual(started.data['deadline_at'], friday + timedelta(minutes=5))
+
+        weekend_assessment = SponsoredViewAssessment.objects.create(
+            week=1,
+            slot=2,
+            field='Software Development',
+            title='Weekend access assessment',
+            description='A published weekend access test.',
+            learning_objectives=['A', 'B', 'C'],
+            duration_minutes=20,
+            status='published',
+        )
+        for order in range(1, 11):
+            correct = f'Weekend answer {order}.'
+            SponsoredViewQuestion.objects.create(
+                assessment=weekend_assessment,
+                order=order,
+                prompt=f'Weekend question {order}?',
+                options=[correct, 'Incorrect option A.', 'Incorrect option B.', 'Incorrect option C.'],
+                correct_answer=correct,
+                rationale='A complete explanation.',
+            )
+        sunday = eat_datetime(2026, 10, 18, 10)
+        weekend_payment = self.create_payment(
+            'SPONSOREDREFWEEKEND',
+            now=sunday,
+            assessment_id=weekend_assessment.id,
+        )
+        self.assertEqual(weekend_payment.status_code, 201)
+        self.assertEqual(weekend_payment.data['status'], 'pending')
+        self.assertEqual(SponsoredViewPayment.objects.count(), 2)
+
         invalid_list_post = self.client.post(
             reverse('sponsored-view-payment-list'),
             {},
