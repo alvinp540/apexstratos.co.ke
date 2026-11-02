@@ -427,7 +427,9 @@ export default function ContestPage() {
       <div className="contest-section-heading"><div><div className="eyebrow">MAIN CONTEST LIBRARY</div><h2>KSh 20 per applicable access period</h2><p>Each published assessment contains ten questions. Payment verification grants field-specific access; the five-minute timer starts only when the server accepts your start action during the Friday–Sunday window.</p></div><span className="contest-price">{libraryCount} matching</span></div>
       <WeeklyScheduleNotice activity="main_contest" />
       <div className="filter-row"><label>Study area<select value={libraryFilters.field} onChange={(event) => setLibraryFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All study areas</option>{studyAreas.map((field) => <option value={field} key={field}>{field}</option>)}</select></label><label>Week<select value={libraryFilters.week} onChange={(event) => setLibraryFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={libraryFilters.topic} onChange={(event) => setLibraryFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label><button className="button button-quiet" onClick={loadLibrary}>↻ Refresh library</button></div>
-      {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <div className="content-grid">{libraryItems.map((assessment) => {
+      {libraryError ? <ErrorState message={libraryError} retry={loadLibrary} /> : libraryLoading ? <Loading label="Loading published main-contest assessments…" /> : libraryItems.length === 0 ? <Empty title="0 complete assessments are currently published">The database currently contains no published main-contest assessment with ten valid multiple-choice questions. Target: 720 assessments / 7,200 questions.</Empty> : <details className="assessment-list-dropdown">
+        <summary><span>Published Main Contest assessments</span><span className="soft-label">Showing {libraryItems.length} of {libraryCount}</span></summary>
+        <div className="assessment-list-dropdown-content"><div className="content-grid">{libraryItems.map((assessment) => {
         const locked = !assessment.has_verified_access && assessment.attempt?.status !== 'in_progress' && assessment.attempt?.status !== 'graded'
         const fieldPayments = payments.filter((payment) => payment.field === assessment.field)
         const latestPayment = fieldPayments[0]
@@ -457,7 +459,8 @@ export default function ContestPage() {
             </form>}
           </div>
         </article>
-      })}</div>}
+      })}</div></div>
+      </details>}
     </section>
     {activeAttempt && activeAssessment ? <ContestAttempt assessment={activeAssessment} attempt={activeAttempt} answers={answers} reasoning={reasoning} onAnswer={(questionId, answer) => updateAnswers({ ...answersRef.current, [questionId]: answer })} onReasoning={(questionId, text) => updateReasoning({ ...reasoningRef.current, [questionId]: text })} onSubmit={submitAnswers} onExit={closeAttempt} onExpireRetry={expireAttempt} timer={timer} submitting={submitting} error={errors.attempt} /> : <section className="contest-assessment-section">
       <div className="contest-section-heading"><div><div className="eyebrow">ASSESSMENT WINDOW</div><h2>Contest assessments and results</h2><p>Published assessments and previous results remain visible. New attempts can only start Friday through Sunday EAT after field-specific payment verification.</p></div><button className="button button-quiet" onClick={refreshContests}>↻ Refresh</button></div>

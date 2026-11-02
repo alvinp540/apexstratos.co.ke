@@ -51,7 +51,10 @@ export function Tutorials() {
     <WeeklyScheduleNotice activity="tutorials" />
     <div className="library-summary"><strong>Free</strong><span>{total} matching published assessments · initial target 640 assessments / 6,400 questions</span></div>
     <div className="filter-row"><label>Study area<select name="field" value={params.field} onChange={update}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={params.week} onChange={update}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input name="topic" maxLength={120} value={params.topic} onChange={update} placeholder="Search titles and descriptions" /></label></div>
-    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorial assessments match these filters">The database currently has no published tutorial assessments for this selection.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><PaginationControls page={page} total={total} onPageChange={setPage} /></>}
+    {status.loading ? <Loading label="Finding published tutorials…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : items.length === 0 ? <Empty title="No published tutorial assessments match these filters">The database currently has no published tutorial assessments for this selection.</Empty> : <details className="assessment-list-dropdown">
+      <summary><span>Published tutorial assessments</span><span className="soft-label">Showing {items.length} of {total}</span></summary>
+      <div className="assessment-list-dropdown-content"><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><PaginationControls page={page} total={total} onPageChange={setPage} /></div>
+    </details>}
   </Page>
 }
 
@@ -78,7 +81,10 @@ export function AreaTutorials() {
     <WeeklyScheduleNotice activity="tutorials" />
     <Link className="back-link inline-back" to="/study">← All study areas</Link>
     <div className="filter-row"><label>Week<select value={week} onChange={(event) => { setWeek(event.target.value); setPage(1) }}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={topic} onChange={(event) => { setTopic(event.target.value); setPage(1) }} placeholder="Search titles and descriptions" /></label></div>
-    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published tutorial assessments match this selection">The database currently has no published tutorial assessments for {field}.</Empty> : <><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><PaginationControls page={page} total={total} onPageChange={setPage} /></>}
+    {status.loading ? <Loading label={`Loading ${field} tutorials…`} /> : status.error ? <ErrorState message={status.error} retry={load} /> : !items.length ? <Empty title="No published tutorial assessments match this selection">The database currently has no published tutorial assessments for {field}.</Empty> : <details className="assessment-list-dropdown">
+      <summary><span>Published tutorial assessments</span><span className="soft-label">Showing {items.length} of {total}</span></summary>
+      <div className="assessment-list-dropdown-content"><div className="content-grid">{items.map((tutorial) => <TutorialCard key={tutorial.id} tutorial={tutorial} />)}</div><PaginationControls page={page} total={total} onPageChange={setPage} /></div>
+    </details>}
   </Page>
 }
 
@@ -654,7 +660,9 @@ export function SponsoredView() {
     <div className="library-summary"><strong>KES 20 → 100 · 40 → 200 · 80 → 400 · 160 → 800 · 320 → 1,600</strong><span>Each tier has its own cycle of ten eligible, admin-verified assessment completions. Maximum five active entries per capability. Attempts remain five minutes.</span></div>
     <div className="filter-row"><label>Study area<select name="field" value={filters.field} onChange={(event) => setFilters((current) => ({ ...current, field: event.target.value }))}><option value="">All areas</option>{studyAreas.map((area) => <option key={area}>{area}</option>)}</select></label><label>Week<select name="week" value={filters.week} onChange={(event) => setFilters((current) => ({ ...current, week: event.target.value }))}><option value="">All 8 weeks</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>Week {index + 1}</option>)}</select></label><label>Topic<input maxLength={120} value={filters.topic} onChange={(event) => setFilters((current) => ({ ...current, topic: event.target.value }))} placeholder="Search titles and descriptions" /></label></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
-    {status.loading ? <Loading label="Finding published Sponsored View assessments…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : assessments.length === 0 ? <Empty title="No complete, published Sponsored View assessments match these filters">No approved assessment content is currently available for this selection. The published content count is zero; no placeholder assessments are shown.</Empty> : <div className="content-grid">{assessments.map((assessment) => {
+    {status.loading ? <Loading label="Finding published Sponsored View assessments…" /> : status.error ? <ErrorState message={status.error} retry={load} /> : assessments.length === 0 ? <Empty title="No complete, published Sponsored View assessments match these filters">No approved assessment content is currently available for this selection. The published content count is zero; no placeholder assessments are shown.</Empty> : <details className="assessment-list-dropdown">
+      <summary><span>Published Sponsored View assessments</span><span className="soft-label">{assessments.length} available</span></summary>
+      <div className="assessment-list-dropdown-content"><div className="content-grid">{assessments.map((assessment) => {
       const assessmentPayments = payments.filter((item) => item.assessment_id === assessment.id)
       const pendingPayment = assessmentPayments.find((item) => item.status === 'pending')
       const payment = assessmentPayments.find((item) => item.status === 'verified' && item.attempt?.status === 'in_progress')
@@ -713,7 +721,8 @@ export function SponsoredView() {
           </form>
         </div>}
       </article>
-    })}</div>}
+    })}</div></div>
+    </details>}
     {attempt && <section ref={attemptPanelRef} className="panel sponsored-attempt" aria-labelledby="sponsored-attempt-title" tabIndex={-1}>
       <div className="contest-section-heading"><div><div className="eyebrow">{attempt.field}</div><h2 id="sponsored-attempt-title">{attempt.title}</h2></div><span className="contest-status">{attempt.status.replaceAll('_', ' ')}</span></div>
       {attempt.status === 'in_progress' && <p role="timer" aria-live="off">Time remaining: {remaining == null ? '—' : `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`}</p>}
