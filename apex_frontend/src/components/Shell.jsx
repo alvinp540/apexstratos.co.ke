@@ -7,7 +7,7 @@ export default function Shell() {
   const location = useLocation()
   const title = navItems.find((item) => location.pathname === item.to || (item.to !== '/dashboard' && location.pathname.startsWith(item.to)))?.label || 'Your Apex'
   return (
-    <div className="app-shell">
+    <div className="app-shell min-h-screen">
       <aside className="sidebar">
         <Link to="/dashboard" className="brand"><span className="brand-symbol">A</span><span>APEXSTRATOS<small>PROVE · PERFORM · PROGRESS</small></span></Link>
         <div className="side-label">WORKSPACE</div>
@@ -21,11 +21,11 @@ export default function Shell() {
           <div className="user-mini"><div className="avatar">{(user?.username || user?.email || 'A')[0].toUpperCase()}</div><div className="user-meta"><strong>{user?.username || 'Apex learner'}</strong><span>{user?.role || 'student'}</span></div><button className="icon-button" title="Sign out" onClick={logout}>↗</button></div>
         </div>
       </aside>
-      <main className="main-area">
+      <main className="main-area min-w-0">
         <header className="topbar"><div className="crumb">APEXSTRATOS <span>/</span> {title.toUpperCase()}</div><div className="top-actions"><span className="live-dot" /> <span className="secure-label">YOUR SPACE</span><Link className="top-avatar" to="/profile" aria-label="Your profile">{(user?.username || 'A')[0].toUpperCase()}</Link><button className="button button-quiet" type="button" onClick={logout}>Sign out</button></div></header>
         <div className="mobile-brand"><Link to="/dashboard" className="brand"><span className="brand-symbol">A</span><span>APEXSTRATOS</span></Link><Link to="/notifications" className="icon-button" aria-label="Notifications">◉</Link></div>
         <nav className={`mobile-nav${user?.is_admin ? ' mobile-nav-admin' : ''}`} aria-label="Student navigation">{mobileNavItems.map((item) => <NavLink key={item.to} to={item.to} aria-label={item.label} title={item.label}><span aria-hidden="true">{item.icon}</span><small>{item.label}</small></NavLink>)}{user?.is_admin && <NavLink to="/admin" aria-label="Admin" title="Admin"><span aria-hidden="true">⌘</span><small>Admin</small></NavLink>}</nav>
-        <div className="content"><Outlet /></div>
+        <div className="content min-w-0"><Outlet /></div>
       </main>
     </div>
   )

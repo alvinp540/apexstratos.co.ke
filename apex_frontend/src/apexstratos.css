@@ -717,6 +717,36 @@ body {
   resize: vertical;
 }
 
+.app-shell,
+.main-area,
+.content,
+.page {
+  min-width: 0;
+}
+
+.page-heading > div {
+  max-width: 100%;
+}
+
+.page-heading h1,
+.page-description {
+  overflow-wrap: anywhere;
+}
+
+.content :is(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.content :is(img, video, iframe, canvas) {
+  max-width: 100%;
+}
+
+.content pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 @media (max-width: 900px) {
   .steps-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
