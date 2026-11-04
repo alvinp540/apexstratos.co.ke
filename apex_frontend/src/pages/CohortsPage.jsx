@@ -18,6 +18,7 @@ export default function CohortsPage() {
   const [assessments, setAssessments] = useState([])
   const [activeAttempt, setActiveAttempt] = useState(null)
   const [activeAssessment, setActiveAssessment] = useState(null)
+  const [assessmentResult, setAssessmentResult] = useState(null)
   const [answers, setAnswers] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [attemptExpired, setAttemptExpired] = useState(false)
@@ -75,6 +76,7 @@ export default function CohortsPage() {
 
   const handleSelectCohort = async (cohort) => {
     setSelectedCohort(cohort)
+    setAssessmentResult(null)
     const { data } = await getAssessments(cohort.id)
     setAssessments(data)
     setView('cohort')
@@ -83,6 +85,17 @@ export default function CohortsPage() {
   const handleStartAssessment = async (assessment) => {
     try {
       const { data } = await startAssessment(assessment.id)
+      if (data.status !== 'in_progress' && data.score != null) {
+        setAssessmentResult({
+          title: assessment.title,
+          score: data.score,
+          passingScore: assessment.passing_score ?? 75,
+          status: data.status,
+        })
+        setView('cohort')
+        return
+      }
+      setAssessmentResult(null)
       setActiveAttempt(data)
       setActiveAssessment(assessment)
       setAnswers(data.answers || {})
@@ -99,7 +112,13 @@ export default function CohortsPage() {
     setSubmitError('')
     try {
       const { data } = await submitAssessment(activeAssessment.id, answers)
-      toast.success(`${data.message} Score: ${data.score?.toFixed(1)}%`)
+      setAssessmentResult({
+        title: activeAssessment.title,
+        score: data.score,
+        passingScore: activeAssessment.passing_score ?? 75,
+        status: data.status,
+      })
+      toast.success(`Assessment graded. Score: ${data.score?.toFixed(1)}%`)
       setView('cohort')
       setActiveAttempt(null)
     } catch (err) {
@@ -187,6 +206,17 @@ export default function CohortsPage() {
               <Link to="/rankings">Leaderboard & merit</Link><span>→</span>
               <Link to="/opportunities">Opportunity placement</Link>
             </div>
+            {assessmentResult && (
+              <div className="card" role="status" style={{ marginBottom: '1rem' }}>
+                <strong>
+                  {assessmentResult.title}: {assessmentResult.score >= assessmentResult.passingScore ? 'Passed' : 'Not passed'}
+                </strong>
+                <p style={{ marginTop: '0.4rem', color: 'var(--color-text-muted)' }}>
+                  Final score: {assessmentResult.score}% · Passing score: {assessmentResult.passingScore}%.
+                  {assessmentResult.status === 'timed_out' ? ' Time expired; saved answers were graded.' : ''}
+                </p>
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
               <div>
                 <h3 style={{ marginBottom: '1rem' }}>Assessments</h3>
@@ -194,7 +224,7 @@ export default function CohortsPage() {
                   <div key={a.title} className="card" style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15,23,42,0.78)', border: '1px solid rgba(148,163,184,0.12)' }}>
                     <div>
                       <div style={{ fontWeight: 600 }}>{a.title}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{a.difficulty || 'Intermediate'} · 5 min maximum · Pass: {a.passing_score || 75}%</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{a.difficulty || 'Intermediate'} · 10 min maximum · Pass: {a.passing_score ?? 75}%</div>
                     </div>
                     <button onClick={() => handleStartAssessment(a)} className="btn-primary">Start</button>
                   </div>

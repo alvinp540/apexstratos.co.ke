@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.db import models
 from django.utils import timezone
+from .weekly_schedule import ASSESSMENT_DURATION_SECONDS
 from .models import (
     Cohort, Assessment, Question, AssessmentAttempt, CohortEnrollment,
     PSPRegistration, PSPVerification, WhatsAppInviteRequest, CohortCoachAssignment,
@@ -134,7 +135,7 @@ class TutorialSerializer(serializers.ModelSerializer):
 
         from .weekly_schedule import attempt_deadline
         try:
-            deadline = attempt.deadline_at or attempt_deadline('tutorials', attempt.started_at, 300)
+            deadline = attempt.deadline_at or attempt_deadline('tutorials', attempt.started_at)
         except ValueError:
             deadline = None
         now = timezone.now()
@@ -216,7 +217,9 @@ class AssessmentAttemptSerializer(serializers.ModelSerializer):
         return timezone.now()
 
     def get_time_remaining(self, obj):
-        deadline = obj.deadline_at or (obj.started_at + timezone.timedelta(seconds=300))
+        deadline = obj.deadline_at or (
+            obj.started_at + timezone.timedelta(seconds=ASSESSMENT_DURATION_SECONDS)
+        )
         return max(0, int((deadline - timezone.now()).total_seconds()))
 
 

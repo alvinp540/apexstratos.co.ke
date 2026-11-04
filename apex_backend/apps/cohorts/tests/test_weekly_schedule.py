@@ -65,7 +65,7 @@ class WeeklyScheduleRuleTests(TestCase):
         )
         self.assertEqual(
             attempt_deadline('tutorials', thursday_last_second),
-            thursday_last_second + timedelta(seconds=300),
+            thursday_last_second + timedelta(seconds=600),
         )
 
     def test_contest_window_ends_at_monday_midnight_and_tutorials_open(self):
@@ -77,7 +77,7 @@ class WeeklyScheduleRuleTests(TestCase):
         self.assertIsNotNone(activity_window('tutorials', monday_start))
         self.assertEqual(
             attempt_deadline('main_contest', sunday_last_second),
-            sunday_last_second + timedelta(seconds=300),
+            sunday_last_second + timedelta(seconds=600),
         )
 
     def test_weekly_status_returns_next_opening_and_current_boundary(self):
@@ -164,7 +164,7 @@ class TutorialScheduleAccessTests(TestCase):
         self.assertEqual(permitted.status_code, 201)
         self.assertEqual(
             permitted.data['deadline_at'],
-            thursday + timedelta(seconds=300),
+            thursday + timedelta(seconds=600),
         )
         self.assertEqual(blocked.status_code, 200)
         self.assertEqual(blocked.data['status'], 'in_progress')
@@ -186,7 +186,7 @@ class TutorialScheduleAccessTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(started.status_code, 201)
 
-    def test_tutorial_attempt_has_five_minute_deadline_and_server_finalizes_saved_answers(self):
+    def test_tutorial_attempt_has_ten_minute_deadline_and_server_finalizes_saved_answers(self):
         started_at = eat_datetime(2026, 10, 12, 10)
         with patch('apps.cohorts.views.timezone.now', return_value=started_at):
             started = self.start()
@@ -194,11 +194,11 @@ class TutorialScheduleAccessTests(TestCase):
         self.assertEqual(started.status_code, 201)
         self.assertEqual(
             started.data['deadline_at'],
-            started_at + timedelta(seconds=300),
+            started_at + timedelta(seconds=600),
         )
         with patch(
             'apps.cohorts.views.timezone.now',
-            return_value=started_at + timedelta(seconds=300),
+            return_value=started_at + timedelta(seconds=600),
         ):
             expired = self.client.post(
                 reverse('tutorial-attempt-answers', kwargs={'attempt_id': started.data['id']}),
@@ -366,7 +366,7 @@ class MainContestScheduleAccessTests(TestCase):
         self.assertEqual(started.data['started_at'], friday)
         self.assertEqual(
             started.data['deadline_at'],
-            friday + timedelta(seconds=300),
+            friday + timedelta(seconds=600),
         )
         self.assertEqual(AssessmentScheduleAttempt.objects.count(), 1)
 

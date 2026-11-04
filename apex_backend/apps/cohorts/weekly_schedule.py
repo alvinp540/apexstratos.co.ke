@@ -5,7 +5,7 @@ from django.utils import timezone
 
 
 EAT = ZoneInfo('Africa/Nairobi')
-ASSESSMENT_DURATION_SECONDS = 300
+ASSESSMENT_DURATION_SECONDS = 600
 ACTIVITY_WEEKDAYS = {
     'tutorials': frozenset((0, 1, 2, 3)),
     'sponsored_view': frozenset(range(7)),

@@ -845,7 +845,7 @@ class AssessmentScheduleAttempt(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     deadline_at = models.DateTimeField(null=True, blank=True)
-    duration_seconds = models.PositiveIntegerField(default=300)
+    duration_seconds = models.PositiveIntegerField(default=600)
 
     tab_switches = models.PositiveIntegerField(default=0)
     time_anomalies = models.PositiveIntegerField(default=0)

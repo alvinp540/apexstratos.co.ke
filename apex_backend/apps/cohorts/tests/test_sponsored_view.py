@@ -452,7 +452,7 @@ class SponsoredViewAccessTests(TestCase):
         self.assertTrue(catalog.data['results'][0]['has_verified_access'])
         self.assertTrue(catalog.data['results'][0]['can_start'])
         self.assertEqual(started.status_code, 201)
-        self.assertEqual(started.data['deadline_at'], friday + timedelta(minutes=5))
+        self.assertEqual(started.data['deadline_at'], friday + timedelta(minutes=10))
 
     def test_timeout_grades_only_saved_answers_and_repeated_finalize_is_idempotent(self):
         monday = eat_datetime(2026, 10, 12, 10)
@@ -470,7 +470,7 @@ class SponsoredViewAccessTests(TestCase):
                 reverse('sponsored-view-attempt-start', kwargs={'payment_id': payment.data['id']}),
                 {}, format='json',
             )
-        self.assertEqual(started.data['deadline_at'], monday + timedelta(seconds=300))
+        self.assertEqual(started.data['deadline_at'], monday + timedelta(seconds=600))
         first = started.data['questions'][0]
         with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday + timedelta(minutes=4, seconds=55)):
             saved = self.client.post(
@@ -480,7 +480,7 @@ class SponsoredViewAccessTests(TestCase):
         self.assertEqual(saved.status_code, 200)
         late_answers = {question['id']: question['options'][0] for question in started.data['questions']}
         submit_url = reverse('sponsored-view-attempt-submit', kwargs={'attempt_id': started.data['id']})
-        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday + timedelta(seconds=300)):
+        with patch('apps.cohorts.sponsored_views.timezone.now', return_value=monday + timedelta(seconds=600)):
             finalized = self.client.post(submit_url, {'answers': late_answers}, format='json')
             repeated = self.client.post(submit_url, {'answers': late_answers}, format='json')
         self.assertEqual(finalized.data['status'], 'timed_out')
@@ -521,7 +521,7 @@ class SponsoredViewAccessTests(TestCase):
                 format='json',
             )
         self.assertEqual(started.status_code, 201)
-        self.assertEqual(started.data['deadline_at'], friday + timedelta(minutes=5))
+        self.assertEqual(started.data['deadline_at'], friday + timedelta(minutes=10))
 
         weekend_assessment = SponsoredViewAssessment.objects.create(
             week=1,
@@ -620,7 +620,7 @@ class SponsoredViewAccessTests(TestCase):
         payment.refresh_from_db()
         self.assertEqual(payment.status, 'pending')
 
-    def test_thursday_attempt_keeps_its_full_five_minutes_across_activity_boundary(self):
+    def test_thursday_attempt_keeps_its_full_ten_minutes_across_activity_boundary(self):
         payment_response = self.create_payment('SPONSOREDREF7', now=eat_datetime(2026, 10, 15, 23, 40))
         payment = SponsoredViewPayment.objects.get(id=payment_response.data['id'])
         payment.status = 'verified'
@@ -636,4 +636,4 @@ class SponsoredViewAccessTests(TestCase):
                 format='json',
             )
         self.assertEqual(started.status_code, 201)
-        self.assertEqual(started.data['deadline_at'], eat_datetime(2026, 10, 16, 0, 2))
+        self.assertEqual(started.data['deadline_at'], eat_datetime(2026, 10, 16, 0, 7))

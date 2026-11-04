@@ -404,7 +404,7 @@ class MainContestAccessTests(APITestCase):
                 reverse('contest-assessment-start', kwargs={'assessment_id': assessment.id}),
                 {}, format='json',
             )
-        self.assertEqual(started.data['deadline_at'], friday + timedelta(seconds=300))
+        self.assertEqual(started.data['deadline_at'], friday + timedelta(seconds=600))
         question = started.data['questions'][0]
         with patch('apps.cohorts.programme_views.timezone.now', return_value=friday + timedelta(minutes=4, seconds=55)):
             saved = self.client.post(
@@ -426,7 +426,7 @@ class MainContestAccessTests(APITestCase):
 
         late_answers = {item['id']: 'A' for item in started.data['questions']}
         submit_url = reverse('contest-assessment-submit', kwargs={'attempt_id': started.data['id']})
-        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday + timedelta(seconds=300)):
+        with patch('apps.cohorts.programme_views.timezone.now', return_value=friday + timedelta(seconds=600)):
             finalized = self.client.post(submit_url, {'answers': late_answers}, format='json')
             repeated = self.client.post(submit_url, {'answers': late_answers}, format='json')
         self.assertEqual(finalized.data['status'], 'timed_out')
