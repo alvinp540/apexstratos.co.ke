@@ -10,6 +10,11 @@ import { listPSPRegistrations, createPSPRegistration } from '../api/pspAPI'
 import { Link } from 'react-router-dom'
 
 const tierLabels = { '10kes': 'KES 10', '100kes': 'KES 100', '1000kes': 'KES 1,000' }
+const paymentPlans = [
+  { value: '10kes', amount: 'KES 10' },
+  { value: '100kes', amount: 'KES 100' },
+  { value: '1000kes', amount: 'KES 1,000' },
+]
 
 export default function CohortsPage() {
   const [cohorts, setCohorts] = useState([])
@@ -76,6 +81,7 @@ export default function CohortsPage() {
 
   const handleSelectCohort = async (cohort) => {
     setSelectedCohort(cohort)
+    setTier(cohort.payment_tier || '100kes')
     setAssessmentResult(null)
     const { data } = await getAssessments(cohort.id)
     setAssessments(data)
@@ -194,7 +200,28 @@ export default function CohortsPage() {
                 <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.7rem' }}>
                   <input placeholder="Full name" value={paymentDetails.full_name} onChange={(e) => setPaymentDetails({ ...paymentDetails, full_name: e.target.value })} />
                   <input placeholder="Phone number" value={paymentDetails.phone_number} onChange={(e) => setPaymentDetails({ ...paymentDetails, phone_number: e.target.value })} />
-                  <select value={tier} onChange={(e) => setTier(e.target.value)}><option value="10kes">KES 10</option><option value="100kes">KES 100</option><option value="1000kes">KES 1,000</option></select>
+                  <fieldset className="payment-plan-fieldset">
+                    <legend>Choose a payment plan</legend>
+                    <div className="payment-plan-grid" role="group" aria-label="Payment plan tiers">
+                      {paymentPlans.map((plan) => {
+                        const isAvailable = selectedCohort.payment_tier === plan.value
+                        return (
+                          <button
+                            key={plan.value}
+                            type="button"
+                            className={`payment-plan-card${tier === plan.value ? ' selected' : ''}`}
+                            onClick={() => setTier(plan.value)}
+                            disabled={!isAvailable}
+                            aria-pressed={tier === plan.value}
+                          >
+                            <span className="payment-plan-name">{plan.amount} tier</span>
+                            <strong>{plan.amount}</strong>
+                            <span className="payment-plan-note">{isAvailable ? 'For this cohort' : 'Available with a matching cohort'}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </fieldset>
                   <button onClick={() => handleRegister(selectedCohort.id)} className="btn-primary">Submit payment for verification</button>
                 </div>
               )}
