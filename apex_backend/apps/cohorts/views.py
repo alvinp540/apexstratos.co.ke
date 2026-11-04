@@ -5,7 +5,7 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Max, Prefetch, Q
+from django.db.models import Count, F, Max, Prefetch, Q
 from datetime import timedelta
 import random
 from collections import defaultdict
@@ -925,6 +925,65 @@ class CohortLeaderboardView(APIView):
             for i, a in enumerate(attempts)
         ]
         return Response(data)
+
+
+class AdminCohortRewardWinnersView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        cohorts = list(Cohort.objects.order_by('title', 'id'))
+        attempts = (
+            AssessmentAttempt.objects
+            .filter(
+                cohort_id__in=[cohort.id for cohort in cohorts],
+                assessment__cohort_id=F('cohort_id'),
+                user__enrollments__cohort_id=F('cohort_id'),
+                status__in=('graded', 'timed_out'),
+                score__isnull=False,
+                is_flagged=False,
+            )
+            .select_related('user__profile', 'assessment')
+            .order_by('cohort_id', 'user_id', '-score', 'assessment_id')
+        )
+
+        best_attempts = {}
+        for attempt in attempts:
+            best_attempts.setdefault(attempt.cohort_id, {}).setdefault(attempt.user_id, attempt)
+
+        results = []
+        for cohort in cohorts:
+            participants = list(best_attempts.get(cohort.id, {}).values())
+            top_score = max((attempt.score for attempt in participants), default=None)
+            winners = []
+            if top_score is not None:
+                for attempt in participants:
+                    if attempt.score != top_score:
+                        continue
+                    profile = getattr(attempt.user, 'profile', None)
+                    winners.append({
+                        'full_name': (
+                            getattr(profile, 'full_name', '')
+                            or attempt.user.get_full_name()
+                            or attempt.user.username
+                        ),
+                        'email': attempt.user.email,
+                        'phone_number': attempt.user.phone_number or '',
+                        'score': attempt.score,
+                        'assessment': attempt.assessment.title,
+                    })
+                winners.sort(key=lambda winner: (winner['full_name'].casefold(), winner['email'].casefold()))
+
+            results.append({
+                'cohort_id': str(cohort.id),
+                'cohort_title': cohort.title,
+                'cohort_status': cohort.status,
+                'result_status': (
+                    'no_scores' if not winners else 'tied' if len(winners) > 1 else 'winner'
+                ),
+                'winners': winners,
+            })
+
+        return Response({'results': results})
 
 
 class HeartbeatView(APIView):

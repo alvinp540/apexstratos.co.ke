@@ -2,7 +2,8 @@ from django.urls import path
 from .views import (
     CohortListView, CohortDetailView, CohortEnrollView,
     CohortAssessmentsView, StartAssessmentView, SaveAssessmentAttemptAnswersView, SubmitAssessmentView,
-    CohortLeaderboardView, HeartbeatView, DailyAvailableCohortsView, MyTestResultsView,
+    CohortLeaderboardView, AdminCohortRewardWinnersView, HeartbeatView,
+    DailyAvailableCohortsView, MyTestResultsView,
     PSPRegistrationListView, PSPRegistrationDetailView, PSPVerifyView,
     AllocateCohortRewardsView,
     CoachPayoutView,
@@ -58,6 +59,11 @@ urlpatterns = [
     path('admin/rewards/cycles/<uuid:cycle_id>/retry/', AdminRewardCyclesView.as_view(), name='admin-reward-cycle-retry'),
     path('admin/rewards/claims/', AdminRewardClaimsView.as_view(), name='admin-reward-claims'),
     path('admin/rewards/claims/<uuid:claim_id>/', AdminRewardClaimsView.as_view(), name='admin-reward-claim-decision'),
+    path(
+        'admin/rewards/cohort-winners/',
+        AdminCohortRewardWinnersView.as_view(),
+        name='admin-cohort-reward-winners',
+    ),
     path('admin/content/', AdminAssessmentReviewListView.as_view(), name='admin-assessment-review-list'),
     path('admin/content/<str:library>/<uuid:content_id>/', AdminAssessmentReviewActionView.as_view(), name='admin-assessment-review-action'),
     path('sponsored-view/assessments/', SponsoredViewAssessmentListView.as_view(), name='sponsored-view-assessment-list'),

@@ -15,6 +15,8 @@ export const sendHeartbeat = (attemptId, data) =>
   api.post(`/cohorts/attempts/${attemptId}/heartbeat/`, data)
 export const allocateCohortRewards = (cohortId) =>
   api.post(`/cohorts/admin/${cohortId}/allocate-rewards/`)
+export const getAdminCohortRewardWinners = () =>
+  api.get('/cohorts/admin/rewards/cohort-winners/')
 export const runMentorshipFollowUp = (cohortId) =>
   api.post(`/cohorts/admin/${cohortId}/mentorship-follow-up/`)
 export const listWhatsAppInvites = () => api.get('/cohorts/mentorship/whatsapp-invites/')

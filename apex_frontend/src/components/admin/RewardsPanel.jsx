@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import api from '../../api/axiosInstance'
 import toast from 'react-hot-toast'
+import CohortRewardWinnersPanel from './CohortRewardWinnersPanel'
 
 export default function RewardsPanel() {
   const [cycles, setCycles] = useState([])
@@ -60,7 +61,9 @@ export default function RewardsPanel() {
     } finally { setBusy(false) }
   }
 
-  return <section className="admin-support-applications">
+  return <>
+    <CohortRewardWinnersPanel />
+    <section className="admin-support-applications">
     <div className="contest-section-heading"><div><div className="eyebrow">REWARDS & PAYOUTS</div><h2>Ten-completion reward cycles</h2><p>Each assessment and fee tier has an independent cycle of ten eligible, finalized, admin-verified payments. Fee tiers KES 20/40/80/160/320 fund exact 50/50 allocations and prizes of KES 100/200/400/800/1,600.</p></div><button className="button button-quiet" onClick={load}>Refresh</button></div>
     <button className="button button-primary" disabled={busy || !cycles.some((cycle) => ['full', 'failed'].includes(cycle.status))} onClick={() => retryCycles()}>Retry pending cycle finalizations</button>
     {loading ? <p>Loading…</p> : <>
@@ -103,5 +106,6 @@ export default function RewardsPanel() {
         {claim.status === 'payout_pending' && <div className="support-application-form"><p>Complete the M-Pesa transfer manually, then record its confirmed reference and reconciliation note.</p><label>Confirmed provider reference<input value={references[claim.id] || ''} onChange={(event) => setReferences({ ...references, [claim.id]: event.target.value })} /></label><label>Reconciliation note<textarea value={notes[claim.id] || ''} onChange={(event) => setNotes({ ...notes, [claim.id]: event.target.value })} /></label><button className="button button-primary" disabled={busy || !references[claim.id] || !notes[claim.id]} onClick={() => decide(claim, 'confirm_paid')}>Confirm reconciled payment</button></div>}
       </article>)}
     </>}
-  </section>
+    </section>
+  </>
 }
